@@ -1,0 +1,97 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2018-2024 CH.C (jchcc)                                   *
+*   Copyright (C) 2020-2024 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : CH.C (jchcc), Neo-Mind                                 *
+*   Created Date  : 2020-11-11                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+// TODO - Not working for clients before 2017. Can't find the /%d in there either.
+//        Also fix the coloring for the prefix when it reaches 100
+
+///
+/// \brief Find the max item count display for inventory & replace with user specified value
+///
+CustomInventoryLimit = function(_)
+{
+	$$(_, 1, "Find the exact /%d display pattern (with add ecx,64)")
+	const pattern = "83 C1 64 51 68 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 0C 8B C8 C7 45 ?? 03 00 00 00 83 79 ?? 10 72 02 8B 09 8B 43 ??";
+	const addrs = Exe.FindHexN(pattern);
+	if (addrs.isEmpty())
+		throw Error("Item count function missing (pattern not found)");
+
+	$$(_, 2.1, "Retrieve user-defined max value")
+	const val = Exe.GetUserInput('$MaxItemCount', D_Uint32, "Limit Input", "Enter the max item count", 100, {max: 999});
+	if (val === true)
+		Cancel("Max Count", 100);
+
+	$$(_, 2.2, "Add new string to .rdata")
+	const [free, freeVir] = Exe.AddText("/" + val);
+
+	$$(_, 2.3, "Patch the reference")
+	for (const matchAddr of addrs)
+	{
+		const strAddr = matchAddr + 5;
+		Exe.SetInt32(strAddr, freeVir);
+	}
+
+	return true;
+};
+
+
+CustomInventoryExpandingLimit = function(_)
+{
+	$$(_, 1, "Find the hardcoded 0x64 (100) limits used for inventory expanding")
+
+	// Two patterns where ECX is loaded with 0x64 (100)
+	const pattern1 = "55 8B EC 8B 45 08 B9 64 00 00 00 0F B7 40 02 66 3B C8 7C 24";
+	const pattern2 = "B9 64 00 00 00 66 3B C8 0F 8C ?? ?? ?? ?? 98 A3 ?? ?? ?? ?? E9 ?? ?? ?? ??";
+
+	const addr1 = Exe.FindHex(pattern1);
+	const addr2 = Exe.FindHex(pattern2);
+
+	if (!addr1 || !addr2)
+		throw Error("One or both inventory expanding limit patterns not found.");
+
+	$$(_, 2.1, "Ask user for new expanding limit value")
+	const val = Exe.GetUserInput(
+		'$InventoryExpandMax',
+		D_Uint32,
+		"Inventory Expanding Limit",
+		"Enter the new inventory expanding limit (default: 100)",
+		100,
+		{max: 999999}
+	);
+	if (val === true)
+		Cancel("Inventory Expanding Limit", 100);
+
+	$$(_, 2.2, "Patch both 0x64 constants with new value")
+
+	// mov ecx, XXXXXXXX → replace 0x64 with user value
+	Exe.SetInt32(addr1 + 7, val);
+	Exe.SetInt32(addr2 + 1, val);
+
+	$$(_, 3, `Inventory expanding limit successfully updated to ${val}`)
+	return true;
+};

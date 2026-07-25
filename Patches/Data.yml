@@ -1,0 +1,465 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) ?-2023 *Various authors*                                 #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind, CrazyBebop                                   #
+#   Created Date  : 2020-08-26                                             #
+#   Last Modified : 2026-03-29                                             #
+#                                                                          #
+############################################################################
+
+CustomData:
+    title : DATA CUSTOMIZATION
+    mutex : false
+    color : deepskyblue
+    
+    patches:
+        - CustomMaxEmbFileSize:
+            title : Customize Max Emblem file size
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Changes the maximum allowed file size for guild emblems. Increase this if players are getting errors when uploading detailed or high-resolution guild emblems.
+        
+        - CustomRodexTax:
+            title : Customize Rodex tax
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Changes the tax percentage deducted when sending zeny through the RoDEx (mail) system. Set to 0 to remove the tax entirely, or adjust to your server's economy.
+        
+        - CustomGuildExpLimit:
+            title : Customize guild exp limit
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Changes the maximum percentage of experience a player can donate to their guild. Default is 50%. Adjust to match your server's guild configuration.
+        
+        - CustomAdvAgencyLimits:
+            title : Customize adventurer agency levels
+            recommend : no
+            author : Andrei Karas (4144), Asheraf
+            desc : Changes the minimum and maximum level range shown in the Adventurer Agency (party finder) window. Adjust to match your server's level cap and party requirements.
+
+        - EnableCustomFonts:
+            title : Enable Official Custom Fonts (Reforged)
+            recommend : no
+            needs : FixFontsCharset
+            author : CrazyBebop, Shinryo
+            desc : Loads custom .ttf fonts via AddFontResourceExA at init, bypassing the broken T2Embed API on modern Windows. Prompts to copy included .ttf fonts to your client folder on first apply. Requires FixFontsCharset (auto-enabled).
+
+        - FixFontsCharset:
+            title : Fix charset for Fonts
+            recommend : no
+            author : CrazyBebop, CH.C (jchcc)
+            desc : Fixes the character encoding (charset) used for official custom fonts (EOT and OTF) so they render correctly on all langtypes. Prevents garbled text when using custom fonts on non-Korean service types. Fixed EDI register clobber for 07-16.
+        
+        - AlwaysAscii:
+            title : Use Ascii on All
+            recommend : no
+            author : Ai4rei/AN
+            desc : Forces ASCII text rendering regardless of the selected font or langtype. Ensures English characters always display correctly on all service types.
+        
+        - CustomSSQuality:
+            title : Customize screenshot quality
+            recommend : no
+            author : Ai4rei/AN
+            desc : Changes the JPEG compression quality for in-game screenshots (0-100). Higher values produce sharper images but larger files. Default quality is relatively low.
+        
+        - CallKoreaClientInfo:
+            title : Always call SelectKoreaClientInfo()
+            recommend : no
+            author : Shinryo , Secret , CrazyBebop
+            desc : Ensures SelectKoreaClientInfo() is always called alongside SelectClientInfo(), unlocking features normally restricted to the Korean service type. Recommended for most servers to enable full client functionality.
+        
+        
+        - DataFolderFirst:
+            title : Read data folder first
+            recommend : no
+            author : Shinryo ,Skylove
+            desc : Loads loose files from the 'data' folder before checking GRF archives. Useful for development and testing custom sprites, textures, or lua files without repacking the GRF.
+        
+        - PlainTextDesc:
+            title : Use plain text descriptions
+            recommend : yes
+            author : Shinryo , Neo-Mind
+            desc : Forces the client to read item and skill description .txt files as plain ASCII text instead of encoded Korean. Required for English-language description files to display correctly.
+        
+        - LoadKrExtSettings:
+            title : Always load korea ExternalSettings lua file
+            recommend : yes
+            author : Secret , Andrei Karas (4144) , X-EcutiOnner,Skylove
+            desc : Forces loading of the Korean ExternalSettings lua file on all langtypes. This file controls many client features and UI options that are otherwise unavailable outside the Korean service type.
+        
+        - IncrViewID:
+            title : Increase headgear viewID limit
+            recommend : no
+            author : Shinryo
+            desc : Raises the maximum headgear View ID limit from the default (1000-3000 depending on client version) up to 32000. Required for servers with large numbers of custom headgear sprites.
+        
+        - No3DBoneLimit:
+            title : Remove 3D bones limit
+            recommend : no
+            author : Ai4rei/AN , Neo-Mind
+            desc : Removes the hardcoded monster ID limit for 3D Granny models, allowing custom 3D monsters beyond the official range. Required for servers that add new 3D monster sprites.
+
+        - CustomQuestLua:
+            title : Load custom Quest Lua/Lub files
+            recommend : no
+            author : Neo-Mind
+            desc : Enables loading of custom quest lua files specified through a YAML configuration. All listed files must be placed in the 'lua files\\quest' folder. Useful for servers with custom quests that need additional quest data files.
+        
+        - IncrMapQuality:
+            title : Increase map quality
+            recommend : no
+            author : Curiosity , Neo-Mind
+            desc : Upgrades map texture rendering from 16-bit to 32-bit color depth, resulting in smoother color gradients and reduced banding on ground textures. May slightly increase memory usage.
+        
+        - EnableEffectTool:
+            title : Enable effect for all maps
+            recommend : no
+            author : Neo-Mind
+            desc : Makes the client load per-map effect files from the EffectTool folder on all maps, not just select ones. Allows custom map effects (weather, ambient particles, etc.) to work everywhere.
+        
+        - ItemInfoPerServer:
+            title : Load iteminfo based on char server
+            recommend : no
+            author : Neo-Mind
+            desc : Loads the ItemInfo lua file and passes the selected character server name as an argument. Allows different item databases per server when hosting multiple char servers (e.g., Renewal vs Pre-Renewal).
+        
+        - UseStateLubIcon:
+            title : Use icons from stateiconimginfo.lub
+            recommend : no
+            author : CH.C (jchcc)
+            desc : Disables hardcoded status effect icons and loads them exclusively from stateiconimginfo.lub instead. Allows full customization of buff/debuff icons through lua.
+        
+        - CustomDLL:
+            title : Add custom DLLs
+            recommend : no
+            author : Neo-Mind
+            desc : Injects custom DLL loading into the client at startup. Specify the DLL filename and exported functions to call. Used for adding custom functionality like anticheat, custom rendering, or server-specific features.
+        
+        - HideBuildInfo:
+            title : Hide build info
+            recommend : no
+            author : Andrei Karas (4144) , CrazyBebop
+            desc : Hides the client's build date, time, and version information by zeroing out all related strings. Prevents players from seeing which exact client version the server uses.
+         
+        - NoCameraLock:
+            title : Disable camera lock
+            recommend : no
+            author : Andrei Karas (4144) , X-EcutiOnner
+            desc : Disables the per-map camera lock defined in ViewPointTable.txt, allowing free camera rotation on all maps. Useful for players who prefer manual camera control indoors and in dungeons.
+        
+        - NoMapInfo:
+            title : Disable map signs
+            recommend : no
+            author : Andrei Karas (4144) , X-EcutiOnner
+            desc : Disables the map name signs (location banners) that appear when entering a new map, controlled by mapInfo.lub. Removes visual clutter for players who find them distracting.
+        
+        - FixArrowsCharset:
+            title : Translate arrows to English
+            recommend : yes
+            author : Andrei Karas (4144) , X-EcutiOnner , Neo-Mind
+            desc : Translates the arrow symbols and menu button labels in the hotkey settings UI from Korean to English. Fixes unreadable Korean text in the shortcut key configuration window.
+        
+        - BossDropIdentified:
+            title : Use 'identified' drops for Boss (MVP) mob
+            recommend : no
+            author : CH.C (jchcc)
+            desc : Forces items dropped by Boss (MVP) monsters to show their identified names in the drop announcement, so players can see exactly what dropped instead of 'Unknown Item'.
+        
+        - TranslateClient:
+            title : Translate client
+            recommend : yes
+            author : Ai4rei/AN , Neo-Mind
+            desc : Replaces hardcoded Korean text strings in the client with translations from a mapping file (defaults to <b>Translations_EN.yml</b>). Covers system messages, UI labels, and other text that cannot be changed through lua or txt files.
+        
+        - CustomCaptchaDecomp:
+            title : Customize Captcha Decomp size
+            recommend : no
+            author : Andrei Karas (4144), Asheraf
+            desc : Changes the maximum zlib decompression buffer size for captcha images. Increase this if captcha images fail to load due to exceeding the default size limit.
+
+        - RestoreCpsDll:
+            title : Restore Cps Dll
+            recommend : no
+            author : Andrei Karas (4144), Skylove
+            desc : Restores the loading of Cps.dll (Gravity's protection DLL) which was removed in newer clients. Only enable if your server requires this DLL. <b>WARNING:</b> Requires the 'Add custom DLLs' patch to be active; may crash without it.
+
+DisableProtect:
+    title : DISABLE PROTECTION
+    mutex : false
+    
+    patches:
+        - NoGGuard:
+            title : Disable Game Guard
+            recommend : yes
+            author : Neo-Mind
+            desc : Disables nProtect GameGuard, Gravity's anti-cheat system built into Renewal clients. Required for servers since GameGuard expects Gravity's official servers and will block connections otherwise.
+        
+SkipLub:
+    title : SKIP LUB
+    mutex : false
+    
+    patches:
+        - SkipSignBoard:
+            title : Skip SignBoard lubs
+            recommend : no
+            author : Andrei Karas (4144) , X-EcutiOnner
+            desc : Skips loading of SignBoardList lub files. Useful if you do not use sign board features or want to avoid errors from missing files.
+        
+        - SkipTownInfo:
+            title : Skip Towninfo lub
+            recommend : no
+            author : Andrei Karas (4144) , X-EcutiOnner
+            desc : Skips loading of Towninfo.lub file. Use this if you handle town information through other means or want to avoid errors from a missing file.
+
+ReadTxtFile:
+    title : READ .txt FILE
+    mutex : false
+    
+    patches:
+        - MsgStrings:
+            title : Always read msgstringtable.txt
+            recommend : yes
+            author : Shinryo
+            desc : Forces the client to load all UI messages from msgstringtable.txt on every langtype instead of using hardcoded Korean strings. Essential for English and other non-Korean servers.
+        
+        - QuestDisplay:
+            title : Always read questid2display.txt
+            recommend : yes
+            author : Shinryo
+            desc : Forces loading of questid2display.txt on all langtypes instead of only langtype 0. Required for quest UI to display correct quest names and descriptions on non-Korean service types.
+
+CustomPath:
+    title : PATH CUSTOMIZATION
+    mutex : false
+    
+    patches:
+        - CustomDefaultBGM:
+            title : Customize Default BGM file
+            recommend : no
+            author : Jian
+            desc : Changes the default background music played on the login screen from <b>bgm\01.mp3</b> to a custom MP3 file of your choice.
+        
+        - CustomItemInfoLub:
+            title : Customize Iteminfo lub
+            recommend : yes
+            author : Neo-Mind
+            desc : Loads a custom lua file for item data instead of the default <b>Iteminfo*.lub</b>. Lets you use a renamed or restructured item database file.
+        
+        - CustomAchieveLub:
+            title : Customize AchievementList lub
+            recommend : yes
+            author : Jian
+            desc : Loads a custom lua file for achievement data instead of the default <b>AchievementList*.lub</b>. Useful for servers with custom achievement systems.
+        
+        - CustomMonSizeEffLub:
+            title : Customize MonsterSizeEffect lub
+            recommend : no
+            author : Jian
+            desc : Loads a custom lua file for monster size effects instead of the default <b>MonsterSizeEffect*.lub</b>. Controls which monsters display enlarged or reduced sprites.
+
+        - CustomTownInfoLub:
+            title : Customize Towninfo lub
+            recommend : yes
+            author : Jian
+            desc : Loads a custom lua file for town/city data instead of the default <b>Towninfo*.lub</b>. Controls warp portal labels and town information displayed on the world map.
+
+        - CustomPetEvoClnLub:
+            title : Customize PetEvolutionCln lub
+            recommend : no
+            author : Jian
+            desc : Loads a custom lua file for pet evolution data instead of the default <b>PetEvolutionCln*.lub</b>. Use when adding custom pet evolution paths.
+        
+        - CustomTipboxLub:
+            title : Customize Tipbox lub
+            recommend : yes
+            author : Jian
+            desc : Loads a custom lua file for the Tip Box (loading screen tips) instead of the default <b>Tipbox*.lub</b>. Allows custom loading tips for your server.
+        
+        - CustomCheckAttLub:
+            title : Customize CheckAttendance lub
+            recommend : no
+            author : Jian
+            desc : Loads a custom lua file for the attendance check-in system instead of the default <b>CheckAttendance*.lub</b>. Use when customizing daily login reward data.
+        
+        - CustomPrivAirplaneLub:
+            title : Customize PrivateAirplane lub
+            recommend : no
+            author : Jian
+            desc : Loads a custom lua file for the Private Airship system instead of the default <b>PrivateAirplane*.lub</b>. Use when customizing airship destinations or teleport data.
+        
+        - CustomMapInfoLub:
+            title : Customize MapInfo lub
+            recommend : yes
+            author : X-EcutiOnner
+            desc : Loads a custom lua file for map information instead of the default <b>MapInfo*.lub</b>. Controls map name banners and location data shown when entering maps.
+        
+        - CustomOngQuestInfoLub:
+            title : Customize OngoingQuestInfoList lub
+            recommend : yes
+            author : Jian
+            desc : Loads a custom lua file for ongoing quest information instead of the default <b>OngoingQuestInfoList*.lub</b>. Use when customizing the quest tracker display.
+
+        - CustomRcmdQuestInfoLub:
+            title : Customize RecommendedQuestInfoList lub
+            recommend : yes
+            author : Jian
+            desc : Loads a custom lua file for recommended quest data instead of the default <b>RecommendedQuestInfoList*.lub</b>. Use when customizing suggested quests shown to players.
+        - CustomspopupLub:
+            title : Customize spopup lub
+            recommend : yes
+            author : llchrisll,Skylove
+            desc : Loads a custom lua file for skill popup data instead of the default <b>spopup.lub</b>. Controls the popup text shown when hovering over skills.
+
+        - CustomChangeMatLub:
+            title : Customize ChangeMaterial lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for material change data instead of the default <b>ChangeMaterial.lub</b>. Controls the material/ingredient lists shown in crafting UIs.
+
+        - CustomQuestQualiLub:
+            title : Customize QuestClassificationInfo lub
+            recommend : yes
+            author : llchrisll,Skylove
+            desc : Loads a custom lua file for quest classification data instead of the default <b>QuestClassificationInfo.lub</b>. Controls quest category labels and sorting in the quest window.
+
+        - CustomRuneDescLub:
+            title : Customize Rune\rune_desc lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune descriptions instead of the default <b>Rune\rune_desc.lub</b>. Use when customizing rune tooltip text.
+
+        - CustomRuneSetDescLub:
+            title : Customize Rune\runeset_desc lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune set descriptions instead of the default <b>Rune\runeset_desc.lub</b>. Use when customizing rune set bonus tooltip text.
+
+        - CustomitemDecomLub:
+            title : Customize Rune\itemDecom lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune item decomposition data instead of the default <b>Rune\itemDecom.lub</b>. Controls which items can be broken down in the rune system.
+
+        - CustomRuneInfoLub:
+            title : Customize Rune\rune_info lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune information instead of the default <b>Rune\rune_info.lub</b>. Controls rune stats and properties displayed in the UI.
+
+        - CustomRuneSetInfoLub:
+            title : Customize Rune\runeset_info lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune set information instead of the default <b>Rune\runeset_info.lub</b>. Controls rune set data and bonuses shown in the UI.
+
+        - CustomRuneSystemTableLub:
+            title : Customize Rune\runeSystem_table lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for the rune system table instead of the default <b>Rune\runeSystem_table.lub</b>. Controls the master rune system configuration data.
+
+        - CustomRuneSystemIdLub:
+            title : Customize Rune\runesystemid lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune system IDs instead of the default <b>Rune\runesystemid.lub</b>. Controls the mapping of rune IDs used by the system.
+
+        - CustomRuneSystemInfoLub:
+            title : Customize Rune\runesystemInfo lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune system display info instead of the default <b>Rune\runesystemInfo.lub</b>. Controls rune system UI labels and descriptions.
+
+        - CustomRuneRewardLub:
+            title : Customize Rune\runeset_reward lub
+            recommend : no
+            author : llchrisll
+            desc : Loads a custom lua file for rune set rewards instead of the default <b>Rune\runeset_reward.lub</b>. Controls rune set completion reward data.
+
+        - CustomLicenseTxt:
+            title : Customize License File
+            recommend : no
+            author : Neo-Mind
+            desc : Changes the EULA license file path from the default <b>..\licence.txt</b> to a custom filename. Path is relative to the Data folder. Use to display your own server rules or terms of service.
+
+        - CustomClientInfo:
+            title : Customize ClientInfo file
+            recommend : no
+            author : Secret
+            desc : Changes the clientinfo XML filename from the default *clientinfo.xml to a custom name. Useful for maintaining multiple server configurations or using a non-standard filename.
+
+        - AllowHomunSkills:
+            title : Unlock all valid skills for homunculus and mercenary AI
+            recommend : no
+            author : 4144
+            desc : Removes the client-side restriction on which skills homunculus and mercenary AI can use, allowing all valid skills to be cast. Server-side skill availability still applies.
+
+SharedBodyPal:
+    title : SHARED BODY PALETTES
+    mutex : true
+    
+    patches:
+        - BodyPalMF:
+            title : Enable shared body palettes - Male & Female
+            recommend : no
+            author : Ai4rei/AN , Neo-Mind
+            desc : Uses one shared set of cloth/body palettes (body_%s_%d.pal) across all job classes while keeping male and female palettes separate. Greatly reduces the number of palette files needed.
+        
+        - BodyPalUnisex:
+            title : Enable shared body palettes - Unisex
+            recommend : no
+            author : Ai4rei/AN , Neo-Mind
+            desc : Uses one shared set of cloth/body palettes (body_%d.pal) for all job classes and both genders. The simplest option -- minimizes palette files to just one set.
+
+SharedHeadPal:
+    title : SHARED HEAD PALETTES
+    mutex : true
+    
+    patches:
+        - HeadPalMF:
+            title : Enable shared head palettes - Male & Female
+            recommend : no
+            author : Ai4rei/AN , Neo-Mind
+            desc : Uses one shared set of hair palettes (head_%s_%d.pal) across all hairstyles while keeping male and female palettes separate. Reduces the number of hair palette files needed.
+        
+        - HeadPalUnisex:
+            title : Enable shared head palettes - Unisex
+            recommend : no
+            author : Ai4rei/AN , Neo-Mind
+            desc : Uses one shared set of hair palettes (head_%d.pal) for all hairstyles and both genders. The simplest option -- minimizes hair palette files to just one set.
+
+MultiGRFs:
+    title : MULTIPLE GRFS
+    mutex : true
+    
+    patches:
+        - GRFsFromIni:
+            title : Enable Multiple GRFs ( INI )
+            recommend : no
+            author : Shinryo
+            desc : Allows loading up to 10 GRF files listed in an INI file (DATA.INI) in your client folder. GRFs are loaded in order, with earlier entries taking priority. The standard way to use multiple GRFs on servers.
+        
+        - GRFsEmbedded:
+            title : Enable Multiple GRFs ( Embedded )
+            recommend : no
+            author : Neo-Mind
+            desc : Embeds GRF filenames directly into the client executable instead of reading from an external INI file. You provide the GRF list at patch time and it gets baked into the exe. No DATA.INI file needed in the client folder.

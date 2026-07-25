@@ -1,0 +1,58 @@
+UIBasicInfoFontSize = function(_)
+{
+    $$(_, 1.1, 'Prompt for UIBasicInfoWnd font size')
+    const newSize = Exe.GetUserInput(
+        '$basicInfoFontSize', D_Int16, 'UIBasicInfoWnd Font Size',
+        'Font size for UIBasicInfoWnd body text. Range 6..64.',
+        18, {min: 6, max: 64}
+    );
+    if (newSize === false) Cancel("Cancelled");
+
+    $$(_, 2.1, 'Patch each push-imm8 site')
+    const sites = [
+        0x0095d4d2, 0x0095d546, 0x0095d5cc, 0x0095d62f, 0x0095d6ec, 0x0095d7ff,
+        0x0095d94e, 0x0095ebeb, 0x0095ec3a, 0x0095ecea, 0x0095ee30, 0x0095ee4c,
+        0x0095ee99, 0x0095eee3, 0x0095ef2e, 0x0095ef7e, 0x0095f01b, 0x0095f0ae,
+        0x00964931, 0x009649a1, 0x00964a7a, 0x009698ea, 0x0096ebba, 0x0096edce,
+        0x0096edd7, 0x0096ee69, 0x0096f446, 0x009714e2, 0x00971521, 0x009753c5,
+        0x00975448, 0x0097547c, 0x0097550f, 0x00975682, 0x009756af, 0x00978144,
+        0x00944bb0, 0x00944bda, 0x009460ed, 0x0094614d, 0x00946425, 0x009466f5,
+        0x00946cc2, 0x00946d5f, 0x009474de, 0x0094757a, 0x0094779b, 0x00948069,
+        0x00948087, 0x00948200, 0x00948302, 0x009485ac, 0x009486b6, 0x00948753,
+        0x009487e5, 0x00948882, 0x00948b32, 0x00948b5e, 0x00948cce, 0x00948de0,
+        0x00948e0b, 0x00948e73, 0x00948f75, 0x009490ef, 0x009491c4, 0x0094987b,
+        0x00949a48, 0x00949add, 0x00949b48, 0x00949c38, 0x00949ccc, 0x008f37f2,
+        0x008f380d, 0x008f3833, 0x008f3853, 0x008f3870, 0x008f3fcb, 0x008f402b,
+        0x008f4050, 0x008f4075, 0x008f4456, 0x008f4d40, 0x008f4fc4, 0x008f57c4,
+        0x008f5ece, 0x008f62a2, 0x0095ebfd, 0x0095ec7c
+    ];
+    const newHex = newSize.toString(16).padStart(2, '0').toUpperCase();
+    let patched = 0, skipped = 0;
+    for (const va of sites) {
+        const raw = Exe.Vir2Phy(va, CODE);
+        const cur = Exe.GetHex(raw, 1).replace(/\s+/g, '').toUpperCase();
+        if (cur !== '6A') { skipped++; continue; }
+        Exe.SetHex(raw + 1, newHex);
+        patched++;
+    }
+    if (patched === 0)
+        throw Error('UIBasicInfoFontSize: no sites patched. Exe signature changed?');
+
+    $$(_, 3.1, 'Patch extra imm32 height constants (e.g. compact variant)')
+    const imm32Sites = [
+        0x0095e938,
+        0x0095e9cd
+    ];
+    const loByte = (newSize) & 0xFF;
+    const loHex  = loByte.toString(16).padStart(2, '0').toUpperCase();
+    for (const va of imm32Sites) {
+        const raw = Exe.Vir2Phy(va, CODE);
+        Exe.SetHex(raw,     loHex);
+        Exe.SetHex(raw + 1, '00');
+        Exe.SetHex(raw + 2, '00');
+        Exe.SetHex(raw + 3, '00');
+    }
+
+    return true;
+};
+UIBasicInfoFontSize.validate = () => Exe.BuildDate >= 20250000;

@@ -1,0 +1,87 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2024 Ai4rei/AN                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Ai4rei/AN                                              *
+*   Created Date  : 2020-11-11                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Change the conditional jumps to JMP after Hourly comparisons inside CRenderer::DrawAgeRate & PlayTime functions
+///
+NoHourly = function(_)
+{
+    // ��������������������������������������������������������������������������������������������
+    // 1. GameGrade / Hourly block 
+    // ��������������������������������������������������������������������������������������������
+    $$(_, 1.1, `Find the GameGrade/Hourly block`)
+
+    let pattern1 = "75 33 66 8B 4D E8 66 85 C9 75 17 84 C0 75 26 C6 05 ?? ?? ?? ?? 01";
+    let addrs1 = Exe.FindHexN(pattern1);
+
+    if (addrs1.isEmpty())
+        throw Error("GameGrade comparison not found");
+
+    // ù ��° ��ġ�� ���
+    let addr1 = addrs1[0];
+
+    $$(_, 1.2, `Patch JNE -> JMP`)
+    // 75 �� EB
+    Exe.SetHex(addr1, "EB");
+
+	// ��������������������������������������������������������������������������������������������
+    // 2. PlayTime 
+	// ��������������������������������������������������������������������������������������������
+    $$(_, 2.1, `Find PlayTime JLE block`)
+
+    let pattern2 = "0F 8E ?? ?? ?? ?? 39 35 ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 8B CF E8 ?? ?? ?? ??";
+    let addr2 = Exe.FindHex(pattern2);
+
+    /**==================================================================
+    The 2026 base exe is a dump of a client that already had this patch
+    live, so the JLE is gone and the NOP+JMP is already in place.
+    Verified on 2026-02-19 (PlayTime hour counter, hours in ESI):
+        00D0898A  85 F6              test esi, esi
+        00D0898C  90 E9 34 03 00 00  nop / jmp 00D08CC6   <- already done
+        00D08992  39 35 3C 04 73 01  cmp dword ptr [g], esi
+    (2025-07-16 has the same block at 00C9DF7C with '0F 8E' there.)
+    Both forms are unique in .text, so this cannot mis-fire.
+    ==================================================================**/
+    if (addr2 < 0)
+    {
+        let done = Exe.FindHex("90 E9 ?? ?? ?? ?? 39 35 ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 8B CF E8 ?? ?? ?? ??");
+        if (done >= 0)
+        {
+            $$(_, 2.11, `PlayTime jump already neutralised - only the GameGrade half was needed`)
+            return true;
+        }
+
+        throw Error("PlayTime JLE comparison not found");
+    }
+
+    $$(_, 2.2, `Patch JLE -> NOP+JMP`)
+    // 0F 8E �� 90 E9
+    Exe.SetHex(addr2, "90 E9");
+
+    return true;
+};

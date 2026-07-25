@@ -1,0 +1,173 @@
+/************************************************************************
+*                                                                       *
+*   Created Date  : 2026-04-26                                          *
+*   Purpose       : Shrink (or grow) the Casting Information popup      *
+*                   that opens when clicking the clock icon on a skill  *
+*                   description. Default original is 345x340 px which   *
+*                   is mostly empty space.                              *
+*                                                                       *
+*   Implementation: 15 widget SetSize() call sites inside vtable[15]    *
+*                   (init/create-children, fn @ 0x00a151d0) push width  *
+*                   and height as immediates. We read each push, scale  *
+*                   it, and write back in the same encoding.            *
+*                                                                       *
+*   Validation    : Each site has an expected original value. If any    *
+*                   site fails verification (different exe build, or    *
+*                   a 2-byte push when we expect 5-byte) the patch      *
+*                   aborts before writing — exe is unchanged.           *
+*                                                                       *
+ ***********************************************************************/
+
+ResizeCastingInfoWindow = function(_)
+{
+    $$(_, 1.1, 'Prompt for horizontal scale')
+    const hPct = Exe.GetUserInput(
+        '$castInfoHScale', D_Int16, 'Casting Info Window H-Scale (%)',
+        'Horizontal scale for the Casting Information window. 100 = original (~345px wide).',
+        65, {min: 30, max: 200}
+    );
+    if (hPct === false) Cancel("Cancelled");
+
+    $$(_, 1.2, 'Prompt for vertical scale')
+    const vPct = Exe.GetUserInput(
+        '$castInfoVScale', D_Int16, 'Casting Info Window V-Scale (%)',
+        'Vertical scale for the Casting Information window. 100 = original (~340px tall).',
+        70, {min: 30, max: 200}
+    );
+    if (vPct === false) Cancel("Cancelled");
+
+    $$(_, 2.0, 'Define dimension sites')
+    // Each entry: [width-push VA, height-push VA, original_w, original_h, label]
+    // The push-width instruction comes immediately AFTER the push-height instruction
+    // (because args are pushed right-to-left in stdcall: height pushed first, width last).
+    const sites = [
+        [0x00a15321, 0x00a1531f, 345,  17, 'title bar'],
+        [0x00a155e8, 0x00a155e6, 100,  17, 'sub-header'],
+        [0x00a1573d, 0x00a1573b,  11,  11, 'close icon'],
+        [0x00a15a0d, 0x00a15a0b,  11,  11, 'misc icon'],
+        [0x00a15cde, 0x00a15cdc, 325,  25, 'section header strip'],
+        [0x00a15e5f, 0x00a15e5d, 140,  22, '"Casting" group header'],
+        [0x00a15ff5, 0x00a15ff3, 140,  22, '"Cooldown" group header'],
+        [0x00a1618e, 0x00a1618c,  44,  22, '"Level" column'],
+        [0x00a16321, 0x00a1631f,  70,  22, '"Fixed" column'],
+        [0x00a1645f, 0x00a1645d,  70,  22, '"Variable" column'],
+        [0x00a1659d, 0x00a1659b,  70,  22, '"Global" column'],
+        [0x00a166de, 0x00a166dc,  70,  22, '"Skill" column'],
+        [0x00a16828, 0x00a1681d, 325, 220, 'main grid (10 rows)'],
+        [0x00a16b39, 0x00a16b37,  13, 100, 'scrollbar'],
+        [0x00a16f76, 0x00a16f74, 330,  35, 'footer strip'],
+    ];
+
+    function uint32LE(val) {
+        return [val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF]
+            .map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+
+    function patchPush(va, origVal, newVal, label) {
+        const raw = Exe.Vir2Phy(va, CODE);
+        const opcode = Exe.GetUint8(raw);
+        if (opcode === 0x68) {
+            // 5-byte: push imm32   (68 XX XX XX XX)
+            const cur = Exe.GetUint32(raw + 1);
+            if (cur !== origVal)
+                throw Error('ResizeCastingInfoWindow: signature mismatch at 0x' +
+                    va.toString(16) + ' (' + label + '): expected push ' + origVal +
+                    ', got push ' + cur + '. Different exe build?');
+            Exe.SetHex(raw + 1, uint32LE(newVal));
+        }
+        else if (opcode === 0x6A) {
+            // 2-byte: push imm8 sign-extended  (6A XX)
+            const cur = Exe.GetUint8(raw + 1);
+            if (cur !== origVal)
+                throw Error('ResizeCastingInfoWindow: signature mismatch at 0x' +
+                    va.toString(16) + ' (' + label + '): expected push ' + origVal +
+                    ', got push ' + cur + '. Different exe build?');
+            if (newVal > 127)
+                throw Error('ResizeCastingInfoWindow: scaled value ' + newVal +
+                    ' at 0x' + va.toString(16) + ' (' + label +
+                    ') exceeds 127 — would need to widen 2-byte push to 5-byte and shift code. ' +
+                    'Pick a smaller scale or implement a code-cave widening.');
+            Exe.SetHex(raw + 1, newVal.toString(16).padStart(2, '0').toUpperCase());
+        }
+        else {
+            throw Error('ResizeCastingInfoWindow: unexpected opcode 0x' +
+                opcode.toString(16) + ' at 0x' + va.toString(16) +
+                ' (' + label + '). Different exe build?');
+        }
+    }
+
+    $$(_, 2.1, 'Verify all sites BEFORE writing (pre-flight)')
+    for (const [wVa, hVa, origW, origH, label] of sites) {
+        // Touch each site to verify; throws if any mismatch.
+        const wRaw = Exe.Vir2Phy(wVa, CODE);
+        const hRaw = Exe.Vir2Phy(hVa, CODE);
+        const wOp = Exe.GetUint8(wRaw);
+        const hOp = Exe.GetUint8(hRaw);
+        const wCur = (wOp === 0x68) ? Exe.GetUint32(wRaw + 1) : (wOp === 0x6A ? Exe.GetUint8(wRaw + 1) : -1);
+        const hCur = (hOp === 0x68) ? Exe.GetUint32(hRaw + 1) : (hOp === 0x6A ? Exe.GetUint8(hRaw + 1) : -1);
+        if (wCur !== origW)
+            throw Error('Pre-flight: width @ 0x' + wVa.toString(16) +
+                ' (' + label + ') = ' + wCur + ', expected ' + origW);
+        if (hCur !== origH)
+            throw Error('Pre-flight: height @ 0x' + hVa.toString(16) +
+                ' (' + label + ') = ' + hCur + ', expected ' + origH);
+    }
+
+    $$(_, 2.2, 'Apply scaled dimensions')
+    let patched = 0;
+    for (const [wVa, hVa, origW, origH, label] of sites) {
+        const newW = Math.max(1, Math.round(origW * hPct / 100));
+        const newH = Math.max(1, Math.round(origH * vPct / 100));
+        patchPush(wVa, origW, newW, label + ' (width)');
+        patchPush(hVa, origH, newH, label + ' (height)');
+        patched++;
+    }
+
+    if (patched !== sites.length)
+        throw Error('ResizeCastingInfoWindow: patched ' + patched + '/' + sites.length);
+
+    $$(_, 3.0, 'Compute frame dimensions to match scaled children')
+    // Original frame is 345 x 334 (confirmed via runtime memory inspection).
+    // Children scale by hPct/vPct; frame must follow so the chrome wraps the content.
+    // Add 5px padding so the rightmost/bottom child has breathing room.
+    const newFrameW = Math.round(345 * hPct / 100) + 5;
+    const newFrameH = Math.round(334 * vPct / 100) + 5;
+
+    $$(_, 3.1, 'Install AutoHook on vtable[15] init to override frame W/H')
+    // The window's W/H live at [this+0x14] and [this+0x18] (CreateCanvas stores them).
+    // Hook at 0x00a151d0 (vtable[15] init/create-children) entry. At entry, ECX = this.
+    //
+    // AutoHook overwrites 5 bytes at 0x00a151d0 with `JMP cave`. Original bytes there:
+    //   55         push ebp
+    //   8B EC      mov ebp, esp
+    //   6A FF      push -1
+    // = exactly 5 bytes. None of them touch ECX, so we can run our writes first.
+    //
+    // AutoHook does NOT auto-append the captured prologue bytes or the JMP back —
+    // we must include both manually in our parts (per FixSkillbarReset and
+    // CloseCutinOnEsc patterns). Cave layout:
+    //   mov [ecx+0x14], newFrameW   ; our override
+    //   mov [ecx+0x18], newFrameH   ; our override
+    //   push ebp                    ; captured original
+    //   mov ebp, esp                ; captured original
+    //   push -1                     ; captured original
+    //   jmp 0x00a151d5              ; back to fn body
+    const initFnVir = 0x00a151d0;
+    const initFnPhy = Exe.Vir2Phy(initFnVir, CODE);
+
+    const parts = [
+        MOV([ECX, 0x14], newFrameW)
+      + MOV([ECX, 0x18], newFrameH)
+      + " 55 8B EC 6A FF"         // captured prologue: push ebp; mov ebp,esp; push -1
+      + JMP(Filler(1))            // jmp back to 0x00a151d5 (after the 5 overwritten bytes)
+    ];
+
+    const args = {
+        targets: { 1: initFnVir + 5 }  // jmp target: original fn body resumes at +5
+    };
+
+    AutoHook(initFnPhy, parts, args);
+
+    return true;
+};
+ResizeCastingInfoWindow.validate = () => Exe.BuildDate >= 20250000;

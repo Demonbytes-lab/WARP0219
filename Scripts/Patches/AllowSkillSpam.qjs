@@ -1,0 +1,269 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2019 Functor                                             *
+*   Copyright (C) 2019-2024 Andrei Karas (4144)                            *
+*   Copyright (C) 2021-2024 Neo-Mind                                       *
+*   Copyright (C) 2026 CrazyBebop                                          *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Functor, Andrei (4144), Neo-Mind, CrazyBebop                  *
+*   Created Date  : 2020-11-22                                             *
+*   Last Modified : 2026-03-04                                             *
+*                                                                          *
+\**************************************************************************/
+
+// TODO - Pre 2017 the patterns are completely missing
+
+///
+/// \brief Enforce Movement of g_session.field_5ADC to ensure spam skill by hotkey
+///
+AllowSkillSpam = function(_)
+{
+	$$(_, 1, `Find the comparison`)
+	let parts =
+	[
+		MOV(EAX, [POS4WC])    //mov eax, dword ptr [g_session.virtual_key_code]
+	,
+		CMP(EBX, 0x7F4)       //cmp ebx, 7F4h
+	,
+		CMOVZ(EAX, [POS4WC])  //cmovz eax, dword ptr [g_session.field_5ADC]
+	+	MOV([POS4WC], EAX)    //mov dword ptr [g_session.virtual_key_code], eax
+	];
+
+	let addr = Exe.FindHex(parts);
+	if (addr < 0 && ROC.IsZero)
+	{
+		parts =
+		[
+			""
+		,
+			CMP(R32, 0x7F4)       //cmp regA, 7F4h
+		,
+			MOV(EAX, [POS4WC])    //mov eax, dword ptr [g_session.virtual_key_code]
+		+	MOV(R32, 0x5D)        //mov regB, 5Dh
+		+	CMOVE(EAX, [POS4WC])  //cmovz eax, dword ptr [g_session.field_5ADC]
+		+	MOV([POS4WC], EAX)    //mov dword ptr [g_session.virtual_key_code], eax
+		];
+		addr = Exe.FindHex(parts);
+	}
+	if (addr > 0)
+	{
+		$$(_, 2.1, `Prepare replacement code - CMP is for triggering Zero Flag`)
+		const code =
+			CMP(EBX, EBX)  //cmp ebx, ebx
+		+	NOPs(parts.byteCount(1) - 2) //4 or 3 byte NOP
+		;
+
+		$$(_, 2.2, `Overwrite the original CMP`)
+		Exe.SetHex(addr + parts.byteCount(0), code);
+	}
+	else if (Exe.BuildDate < 20180700)
+	{
+		throw Error("Pattern not found");
+	}
+	else
+	{
+		$$(_, 3.1, `Find the new comparison`)
+		const mvReg = MOV(R32, [EBP, ROC.FullVer >= 14.29 ? NEG3WC : NEG2WC]);
+		let code =
+			CMP(Exe.Version < 14 ? R32 : EAX, 0x7F4) //cmp regA, 7F4h ; regA = EAX for VC14.16
+		+	JE(WCp)                                  //je short _skip
+		+	(ROC.FullVer == 14.29 ? '' : mvReg)      //<blank> OR mov regB, dword ptr [LOCAL.x]
+		+	MOV(R32, 0x438)                          //mov regC, 438h
+		+	MOV([EBP, NEG2WC], R16)                  //mov word ptr [LOCAL.y], reg16D
+		+	(ROC.FullVer == 14.29 ? mvReg : '')      //mov regB, dword ptr [LOCAL.x] or <blank>
+		;
+
+		addr = Exe.FindHex(code);
+
+		if (addr < 0) {
+			addr = Exe.FindHex("0F B7 D0 0F B7 CE 3D F4 07 00 00 74");
+			if (addr > 0) {
+				addr += 6;
+			}
+		}
+
+		if (addr < 0) {
+			$$(_, '3.1b', `Retry without the 7F4h pre-check (2026 clients)`)
+			//The 'cmp regA, 7F4h + je' pair in front of the block is gone on the 2026
+			//clients - the 7F4h immediate does not occur anywhere in that function anymore.
+			//The block itself is intact, so anchor on its first two constant loads instead;
+			//that pair occurs exactly once on 2026-02-19 and not at all on 2025-07-16.
+			const anchors = Exe.FindHexN(MOV(R32, 0x438) + MOV(R32, 0x5D)); //mov regC, 438h ; mov regD, 5Dh
+			if (anchors.length === 1)
+				addr = anchors[0];
+		}
+
+		if (addr < 0)
+			throw Error("New Pattern not found");
+
+		$$(_, 3.2, `Extract the comparison`)
+		const cmp74 = Instr.FromAddr(addr);
+
+		$$(_, 3.3, `Find the code where the comparison with the virtual_key_code is made`)
+		code =
+			TEST(R32, R32)     //test regA, regA
+		+	JZ(WCp)            //jz short _skip
+		+	CMP([POS4WC], R32) //cmp dword ptr [tgt], regB
+		+	JE(WCp)            //je short _assign
+		+	MOV(ECX, POS4WC)   //mov ecx, offset#1
+		+	CALL(ALLWC)        //call assigner
+		+	MOV([POS4WC], R32) //mov dword ptr [src], regB ; _assign
+		;
+		let addr2 = Exe.FindHex(code);
+		let isModernReorder = false;
+
+		if (addr2 < 0) {
+			addr2 = Exe.FindHex("83 7D ?? 00 74 ?? 39 3D ?? ?? ?? ?? 74 ?? B9 ?? ?? ?? ?? E8");
+			if (addr2 > 0) {
+				isModernReorder = true;
+			}
+		}
+
+		if (addr2 < 0 && ROC.FullVer >= 14.29)
+		{
+			$$(_, '3.3b', `VS2022 inlines virtual_key_code with CMOVE — find and make unconditional`)
+			code =
+				MOV(EAX, [POS4WC])    //mov eax, dword ptr [g_session.virtual_key_code]
+			+	CMOVE(EAX, R32)       //cmove eax, regA ; conditional copy of field_5ADC
+			;
+			addr2 = Exe.FindHex(code, cmp74.Addr, cmp74.Addr + 0x80);
+
+			let cmoveAddr = addr2 < 0 ? -1 : addr2 + 5; // skip the MOV EAX,[addr] (5 bytes: A1 xx xx xx xx)
+
+			if (cmoveAddr < 0)
+			{
+				$$(_, '3.3c', `Retry with unrelated stores scheduled in between (2026 clients)`)
+				//On 2026-02-19 the compiler interleaves 3 unrelated word stores between the
+				//load and the CMOVE, so they are no longer adjacent. The load & the store
+				//back to the same global still bracket the CMOVE though, which identifies it.
+				const ldAddr = Exe.FindHex(MOV(EAX, [POS4WC]), cmp74.Addr, cmp74.Addr + 0x80);
+				if (ldAddr < 0)
+					throw Error("Inlined virtual_key_code load not found");
+
+				const vkcAddr = Exe.GetInt32(ldAddr + 1);
+				const stAddr = Exe.FindHex(MOV([vkcAddr], EAX), ldAddr + 5, ldAddr + 0x40);
+				if (stAddr < 0)
+					throw Error("Inlined virtual_key_code store not found");
+
+				cmoveAddr = Exe.FindHex(CMOVE(EAX, R32), ldAddr + 5, stAddr);
+			}
+
+			if (cmoveAddr < 0)
+				throw Error("Inlined virtual_key_code CMOVE not found");
+
+			$$(_, '3.4b', `Change CMOVE to unconditional MOV + NOP`)
+			const srcReg = Exe.GetUint8(cmoveAddr + 2) & 0x7; // extract source register from CMOVE ModR/M
+			Exe.SetHex(cmoveAddr, MOV(EAX, R32.List[srcReg]) + NOP);
+
+			$$(_, '4b', `Hook at the CMP to copy field_5ADC → virtual_key_code before comparing`)
+			// For the inlined case, the CMOVE→MOV change is sufficient.
+			// No AutoHook needed — the unconditional MOV ensures field_5ADC always overwrites virtual_key_code.
+		}
+		else if (addr2 < 0)
+		{
+			throw Error("virtual_key_code reference missing");
+		}
+		else if (!isModernReorder)
+		{
+			$$(_, 3.4, `Extract the first 4 instructions`)
+			const test0 = Instr.FromAddr(addr2);
+			let jz1 = test0.getNext();
+			const rcmp = jz1.getNext();
+			let jz2 = rcmp.getNext();
+
+			$$(_, 3.5, `Update the jumps`)
+			jz1.Immd -= (rcmp.Size + jz2.Size);
+			jz2.Immd += (test0.Size + jz1.Size);
+
+			$$(_, 3.6, `Reorder and apply`)
+			Exe.SetHex(addr2, rcmp + jz2 + test0 + jz1);
+
+			$$(_, 3.7, `Extract the target address`)
+			const tgt = rcmp.Disp;
+
+			$$(_, 4.1, `Construct the new function`)
+			code =
+				PUSH_EAX             //push eax
+			+	MOV(EAX, [tgt + 4])  //mov eax, dword ptr [src]
+			+	MOV([tgt], EAX)      //mov dword ptr [tgt], eax
+			+	POP_EAX              //pop eax
+			+	cmp74                //cmp regA, 7F4h ; regA = EAX for VC14.16
+			+	RETN()               //retn
+			;
+
+			$$(_, 4.2, `Prepare the arguments for auto-hook`)
+			const args =
+			{
+				isCall: true,
+				nops: cmp74.Size - 5
+			};
+
+			$$(_, 4.3, `Add our code and call it from the original comparison address`)
+			AutoHook(cmp74.Addr, code, args);
+		}
+		else
+		{
+			$$(_, 3.4, `Extract modern instructions`)
+			const cmp0 = Instr.FromAddr(addr2);
+			let jz1 = cmp0.getNext();
+			const rcmp = jz1.getNext();
+			let jz2 = rcmp.getNext();
+
+			$$(_, 3.5, `Update modern jumps`)
+			jz1.Immd -= (rcmp.Size + jz2.Size);
+			jz2.Immd += (cmp0.Size + jz1.Size);
+
+			$$(_, 3.6, `Reorder modern and apply`)
+			Exe.SetHex(addr2, rcmp + jz2 + cmp0 + jz1);
+
+			$$(_, 3.7, `Extract the target address`)
+			const tgt = rcmp.Disp;
+
+			$$(_, 4.1, `Construct the new function`)
+			code =
+				PUSH_EAX
+			+	MOV(EAX, [tgt + 4])
+			+	MOV([tgt], EAX)
+			+	POP_EAX
+			+	cmp74
+			+	RETN()
+			;
+
+			$$(_, 4.2, `Prepare the arguments for auto-hook`)
+			const args =
+			{
+				isCall: true,
+				nops: cmp74.Size - 5
+			};
+
+			$$(_, 4.3, `Add our code and call it from the original comparison address`)
+			AutoHook(cmp74.Addr, code, args);
+		}
+	}
+
+	return true;
+};
+
+///
+/// \brief Disable for Pre-2017 (for now).
+///
+AllowSkillSpam.validate = () =>
+	Exe.BuildDate > 20170000;

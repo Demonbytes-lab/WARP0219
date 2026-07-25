@@ -1,0 +1,327 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2021-2024 Neo-Mind                                       *
+*   Copyright (C) 2026 CrazyBebop                                         *
+*                                                                          *
+*   This file is a part of WARP project                                    *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Neo-Mind, CrazyBebop                                  *
+*   Created Date  : 2021-04-04                                             *
+*   Last Modified : 2026-03-11                                             *
+*                                                                          *
+\**************************************************************************/
+
+///======================================================================///
+///
+/// \brief Modify the resource table to use a user-provided icon
+///
+///        RestoreIcon - Existing icon will be used
+///        CustomIcon  - User provides an icon file (any format/size)
+///
+/// Rewritten by CrazyBebop for 07-16 client:
+/// - Targets Group 123 (main 32bpp app icon group)
+/// - Supports any icon size/bpp including 256x256 PNG
+/// - Allocates new PE space if icon data exceeds existing slot
+/// - Rewrites all GRPICONDIR entries + redirects Groups 119/114
+///
+///======================================================================///
+EnableIcon = function(patchName)
+{
+    const _ = patchName + ' : ';
+
+    $$(_ + '1.1 - Get the Resource tree')
+    const tree = ROC.getRsrcTree();
+
+    $$(_ + '1.2 - Get the Resource entry for RT_GROUP_ICON (0xE)')
+    const entry = tree.traverse(0xE);
+    if (entry === false)
+    {
+        throw Error("Unable to find icongrp");
+    }
+
+    $$(_ + '1.3 - Get the subdir for 119, 114, and 123')
+    let subEntry1 = entry.traverse(119);
+    let subEntry2 = entry.traverse(114);
+    let subEntry3 = entry.traverse(123);
+
+    /**==================================================================
+    2026 clients ship a single icon group.
+    2025-07-16 RT_GROUP_ICON holds 4 groups:
+        114 (the one Explorer picks), 119 (the one the client LoadIcon()s),
+        123 (the 32bpp master) and 124.
+    2026-02-19 holds exactly one: group 123 (7 RT_ICON members, ids 1..7,
+    largest 128x128 32bpp) - 114/119/124 were dropped.
+    So 119 and 114 are optional from now on. Without them there is
+    nothing to cross-link: group 123 is the only group, hence the one
+    both Explorer and the client resolve to.
+    ==================================================================**/
+    if (subEntry3 === false && (subEntry1 === false || subEntry2 === false))
+    {
+        throw Error("Unable to find icongrp subdirs (langs)");
+    }
+
+    if (subEntry1 !== false && subEntry2 !== false)
+    {
+        $$(_ + '1.4 - Overwrite the entry for 114 with data from 119')
+        Exe.SetHex(subEntry2.Pos + 4, Exe.GetHex(subEntry1.Pos + 4, 4), 4);
+    }
+
+    if (patchName === "CustomIcon")
+    {
+        //============================================//
+        // Now that icon is enabled lets overwrite it //
+        //============================================//
+
+        $$(_ + '2.1 - Load the new icon file')
+        const iconFile = Exe.GetUserInput('$inpIconFile', D_InFile, "Custom Icon", "Enter the icon file", "Inputs/Sample.ico", {filters: "Icon files (*.ico)"});
+        if (iconFile === false)
+            Cancel("No icon file selected");
+
+        const iconObj = new Icon(iconFile);
+
+        $$(_ + '2.2 - Pick the best image from the icon file (largest 32bpp, then largest any)')
+        let imgEntry = false;
+        let bestSize = 0;
+
+        for (const e of iconObj.Entries)
+        {
+            let w = (e.bWidth === 0) ? 256 : e.bWidth;
+            let h = (e.bHeight === 0) ? 256 : e.bHeight;
+            let pixels = w * h;
+
+            // Prefer 32bpp, then largest
+            if (e.wBitCount === 32 && pixels > bestSize)
+            {
+                imgEntry = e;
+                bestSize = pixels;
+            }
+        }
+
+        // Fallback: pick largest of any bpp
+        if (!imgEntry)
+        {
+            bestSize = 0;
+            for (const e of iconObj.Entries)
+            {
+                let w = (e.bWidth === 0) ? 256 : e.bWidth;
+                let h = (e.bHeight === 0) ? 256 : e.bHeight;
+                let pixels = w * h;
+                if (pixels > bestSize)
+                {
+                    imgEntry = e;
+                    bestSize = pixels;
+                }
+            }
+        }
+
+        if (!imgEntry)
+            throw Error("No usable images found in the icon file");
+
+        $$(_ + '2.3 - Find Group 123 (main app icon group with 32bpp icons)')
+        let grpEntry = subEntry3;
+
+        // Fallback to 119 if 123 doesn't exist
+        if (grpEntry === false)
+            grpEntry = subEntry1;
+
+        if (grpEntry === false)
+            throw Error("Unable to find a usable icon group");
+
+        // 1042 (ko-KR) is what every kRO build uses, but fall back to
+        // whatever single lang entry is present instead of dying.
+        let grpLang = grpEntry.traverse(1042);
+        if (grpLang === false && grpEntry.Entries !== undefined && grpEntry.Entries.length > 0)
+            grpLang = grpEntry.Entries[0];
+
+        if (grpLang === false)
+            throw Error("Unable to find icon group lang entry");
+
+        if (!grpLang.IsFile)
+            throw Error("Icon group lang entry is not a file");
+
+        $$(_ + '2.4 - Read GRPICONDIR and find the largest 32bpp icon resource')
+        let grpAddr = grpLang.DataAddr;
+        const grpCount = Exe.GetInt16(grpAddr + 4);
+        let targetAddr = false;  // Address of the GRPICONDIR entry to modify
+        let targetResID = false;
+        let targetSize = 0;
+
+        for (let i = 0; i < grpCount; i++)
+        {
+            let a = grpAddr + 6 + i * 14;
+            let w      = Exe.GetUint8(a);
+            let h      = Exe.GetUint8(a+1);
+            let bpp    = Exe.GetInt16(a+6);
+            let bsize  = Exe.GetInt32(a+8);
+            let resID  = Exe.GetInt16(a+12);
+
+            let rw = (w === 0) ? 256 : w;
+            let rh = (h === 0) ? 256 : h;
+            let pixels = rw * rh;
+
+            // Prefer 32bpp entries, pick the largest
+            if (bpp === 32 && pixels > targetSize)
+            {
+                targetAddr = a;
+                targetResID = resID;
+                targetSize = pixels;
+            }
+        }
+
+        // Fallback: largest of any bpp
+        if (targetResID === false)
+        {
+            targetSize = 0;
+            for (let i = 0; i < grpCount; i++)
+            {
+                let a = grpAddr + 6 + i * 14;
+                let w      = Exe.GetUint8(a);
+                let h      = Exe.GetUint8(a+1);
+                let bsize  = Exe.GetInt32(a+8);
+                let resID  = Exe.GetInt16(a+12);
+
+                let rw = (w === 0) ? 256 : w;
+                let rh = (h === 0) ? 256 : h;
+                let pixels = rw * rh;
+
+                if (pixels > targetSize)
+                {
+                    targetAddr = a;
+                    targetResID = resID;
+                    targetSize = pixels;
+                }
+            }
+        }
+
+        if (targetResID === false)
+            throw Error("No suitable icon resource found in exe");
+
+        $$(_ + '2.5 - Get the RT_ICON resource entry for resID ' + targetResID)
+        let memEntry = tree.traverse(0x3, targetResID, 1042);
+        if (memEntry === false)
+        {
+            // same lang fallback as above (2.3)
+            const memGrp = tree.traverse(0x3, targetResID);
+            if (memGrp !== false && memGrp.Entries !== undefined && memGrp.Entries.length > 0)
+                memEntry = memGrp.Entries[0];
+        }
+        if (memEntry === false || !memEntry.IsFile)
+            throw Error("Unable to find RT_ICON resource for ID " + targetResID);
+
+        $$(_ + '2.6 - Write icon data (allocate new space if needed)')
+        let existingSize = Exe.GetInt32(targetAddr + 8);
+
+        if (imgEntry.dwBytesInRes <= existingSize)
+        {
+            // Fits in existing slot - overwrite in place
+            Exe.SetHex(memEntry.DataAddr, imgEntry.iconImage);
+        }
+        else
+        {
+            // Allocate new space and redirect the resource entry
+            const [newPhy, newVir] = Exe.Allocate(imgEntry.dwBytesInRes, 0x10);
+            Exe.SetHex(newPhy, imgEntry.iconImage);
+
+            // Update RT_ICON resource data entry: RVA and size
+            const newRVA = newVir - Exe.ImageBase;
+            Exe.SetInt32(memEntry.Addr, newRVA);
+        }
+
+        $$(_ + '2.7 - Update RT_ICON resource data entry size')
+        Exe.SetInt32(memEntry.Addr + 4, imgEntry.dwBytesInRes);
+
+        $$(_ + '2.8 - Overwrite ALL Group 123 GRPICONDIR entries with custom icon')
+        // Rewrite every entry to point to our custom icon resID.
+        // Keeps count intact so Windows sees all 7 slots → better preview rendering.
+        for (let i = 0; i < grpCount; i++)
+        {
+            let e = grpAddr + 6 + i * 14;
+            Exe.SetUint8(e,      imgEntry.bWidth);       // width (0 = 256)
+            Exe.SetUint8(e + 1,  imgEntry.bHeight);      // height (0 = 256)
+            Exe.SetUint8(e + 2,  imgEntry.bColorCount);  // color count
+            Exe.SetUint8(e + 3,  0);                     // reserved
+            Exe.SetInt16(e + 4,  imgEntry.wPlanes);      // planes
+            Exe.SetInt16(e + 6,  imgEntry.wBitCount);    // bit count
+            Exe.SetInt32(e + 8,  imgEntry.dwBytesInRes); // size
+            Exe.SetInt16(e + 12, targetResID);           // all point to custom RT_ICON
+        }
+
+        $$(_ + '2.9 - Redirect Groups 119 and 114 to use Group 123 GRPICONDIR')
+        // Now Group 123 has exactly 1 icon: our 256x256.
+        // Windows will scale it down for all display contexts.
+        // Group 119 = client LoadIcon, Group 114 = Explorer display.
+        // Skipped on 2026 clients - they only ship group 123, so there is
+        // nothing left to redirect (see 1.3).
+        if (subEntry3 !== false)
+        {
+            if (subEntry1 !== false)
+                Exe.SetHex(subEntry1.Pos + 4, Exe.GetHex(subEntry3.Pos + 4, 4), 4);
+
+            if (subEntry2 !== false)
+                Exe.SetHex(subEntry2.Pos + 4, Exe.GetHex(subEntry3.Pos + 4, 4), 4);
+        }
+    }
+
+    return true;
+};
+
+///++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++///
+/// \brief Wrappers for individual patches.                              ///
+///++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++///
+RestoreIcon = EnableIcon;
+CustomIcon  = EnableIcon;
+
+if (typeof Icon === 'undefined') //avoid redefinition
+{
+    ///
+    /// \brief Class representing an icon
+    ///
+    Icon = class
+    {
+        constructor(name)
+        {
+            const _ = 'Icon.constructor : ';
+
+            $$(_ + '1.1 - Open the icon file')
+            let handle = new BinFile(name, 'r');
+            if (!handle.Valid)
+                throw Error("Unable to read ico file");
+
+            $$(_ + '1.2 - Read the header entries')
+            this.Reserved = handle.ReadUint16();
+            this.Type = handle.ReadUint16();
+            this.ImgCount = handle.ReadUint16();
+            this.Entries = [];
+
+            $$(_ + '2.1 - Read all the image entry & data')
+            for (let i = 0; i < this.ImgCount; i++)
+            {
+                this.Entries[i] = {
+                    bWidth:       handle.ReadUint8(),
+                    bHeight:      handle.ReadUint8(),
+                    bColorCount:  handle.ReadUint8(),
+                    bReserved:    handle.ReadUint8(),
+                    wPlanes:      handle.ReadUint16(),
+                    wBitCount:    handle.ReadUint16(),
+                    dwBytesInRes: handle.ReadUint32(),
+                    dwImgOffset:  handle.ReadUint32()
+                };
+
+                this.Entries[i].iconImage = handle.ReadHex(
+                    this.Entries[i].dwBytesInRes,
+                    this.Entries[i].dwImgOffset
+                );
+            }
+
+            $$(_ + '2.2 - Close the file')
+            handle.Close();
+        }
+    };
+}

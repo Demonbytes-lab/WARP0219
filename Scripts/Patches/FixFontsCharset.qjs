@@ -1,0 +1,160 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2020-2024 CH.C (jchcc)                                   *
+*   Copyright (C) 2026 CrazyBebop                                          *
+*                                                                          *
+*   This file is a part of WARP project                                    *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : CrazyBebop, CH.C (jchcc)                               *
+*   Created Date  : 2021-06-14                                             *
+*   Last Modified : 2026-03-19                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Use a custom table to apply the correct charset for Official Custom Fonts on all Langtypes
+///
+FixFontsCharset = function(_)
+{
+	$$(_, 1.1, `Find the g_fontCharSet assignment inside DrawDC::SetFont function`);
+	let parts;
+
+	switch (Exe.Version)
+	{
+		case 6:
+		case 9:
+			if (Exe.BuildDate < 20130000)
+			{
+				parts =
+				[
+					TEST(ESI, ESI)
+				+	POP(ESI)
+				+	JNZ(WCp)
+				+	CMP(EAX, 0x14)
+				+	JL(WCp)
+				+	MOV([ECX, WCp], EAX)
+				+	MOV(EAX, [ROC.StkReg, ROC.HasFP ? 0xC : 0x8])
+				+	MOV([ECX, WCp], EAX),
+
+					MOV(EDX, [POS4WC])
+				];
+				break;
+			}
+
+		case 10:
+			parts =
+			[
+				TEST(EDI, EDI)
+			+	POP(EDI)
+			+	POP(ESI)
+			+	JNZ(POS1WC)
+			+	CMP(EAX, 0x14)
+			+	JL(POS1WC)
+			+	MOV([ECX, WCp], EDX)
+			+	MOV(DL, [ROC.StkReg, ROC.HasFP ? 0x10 : 0xC])
+			+	MOV([ECX, WCp], EAX),
+
+				MOV(EAX, [POS4WC])
+			];
+			break;
+
+		case 11:
+			parts =
+			[
+				TEST(EDI, EDI)
+			+	JNZ(POS1WC)
+			+	CMP(EDX, 0x14)
+			+	JL(POS1WC)
+			+	MOV([ESI, WCp], EDX)
+			+	MOV([ESI, WCp], ECX),
+
+				MOV(EAX, [POS4WC])
+			];
+			break;
+
+		default: // VC14+
+			if (Exe.BuildDate >= 20250200)
+			{
+				parts =
+				[
+					MOV(EAX, [POS4WC])   // default charset
+				+	CMP(EDX, 0x14)
+				+	JGE(7)
+				];
+			}
+			else
+			{
+				parts =
+				[
+					MOV([ESI, WCp], EDX)
+				+	MOV([ESI, WCp], ECX)
+				+	TEST(EDI, EDI)
+				+	JNZ(0xA),
+
+					MOV(EAX, [POS4WC])
+				+	CMP(EDX, 0x14)
+				+	JGE(7)
+				];
+			}
+			break;
+	}
+
+	let addr = Exe.FindHex(parts);
+	if (addr < 0)
+		throw Error("Function not found");
+
+	let movIns = Instr.FromAddr(addr + parts.byteCount(0));
+
+	addr = Exe.FindHex(MOV(EAX, [4, R32, movIns.Disp]));
+	if (addr < 0)
+		throw Error("Table value retrieval missing");
+
+	movIns = Instr.FromAddr(addr);
+
+	LANGTYPE.load();
+
+	const [, csTbl] = Exe.AddHex(
+		" 81 00 80 86 88 DE 00 00 00 00 00 00 00 00 CC A3 00 00 00 B2 00"
+	);
+
+	parts =
+	[
+		CMP(EDX, 0x14)
+	+	JGE(Filler(1,1))
+	+	movIns
+	+	JMP(Filler(2)),
+
+		MOV(EAX, [LANGTYPE])
+	+	MOVZX(EAX, BYTE_PTR, [EAX, csTbl])
+	+	JMP(Filler(2))
+	];
+
+	const [, _next] = MapAddrs(parts);
+
+	const args =
+	{
+		localTgts : { '1,1' : _next },
+		targets   : { 2 : Exe.Phy2Vir(movIns.NextAddr, CODE) },
+		nops      : movIns.Size - 5
+	};
+
+	AutoHook(movIns.Addr, parts, args);
+
+	return true;
+};

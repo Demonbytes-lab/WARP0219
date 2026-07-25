@@ -1,0 +1,78 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2024 Ai4rei/AN                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Ai4rei/AN                                              *
+*   Created Date  : 2020-11-11                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Modify the JPEG_CORE_PROPERTIES structure assignment inside CRenderer::SaveJPG function to set jquality member to user specified value
+///
+CustomSSQuality = function(_)
+{
+	function findPair(){
+		let a = Exe.FindHex( MOV([EBP, WCn], 3) + MOV([EBP, WCn], 2) );
+		if (a >= 0) return { addr:a, base:EBP };
+
+		a = Exe.FindHex( MOV([ESP, WCp], 3) + MOV([ESP, WCp], 2) );
+		if (a >= 0) return { addr:a, base:ESP };
+
+		return null;
+	}
+
+	let q = Exe.GetUserInput('$ssQuality', D_Int8,
+		"Screenshot Quality", "Enter JPEG quality (0–100)", 85, {min:0, max:100});
+	if (q === false) return false;
+
+	if (Exe.BuildDate < 20241200)
+	{
+		const hit = findPair();
+		if (!hit) throw Error("Legacy mode: DIBChannels/DIBColor pattern not found");
+
+		const dibDisp = Instr.FromAddr(hit.addr).Disp;
+		const jqDisp  = dibDisp + 0x3C;
+
+		const code = MOV([hit.base, jqDisp], q);
+		Exe.SetHex(hit.addr, code);
+
+		return true;
+	}
+
+	else
+	{
+		const hit = findPair();
+		if (!hit){
+
+			return true;
+		}
+
+		const dibDisp = Instr.FromAddr(hit.addr).Disp;
+		const jqDisp  = dibDisp + 0x3C;
+
+		const code = MOV([hit.base, jqDisp], q);
+		Exe.SetHex(hit.addr, code);
+
+		return true;
+	}
+};

@@ -1,0 +1,753 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 NoxaraRO                                            *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : NoxaraRO                                               *
+*   Created Date  : 2026-07-22                                             *
+*   Last Modified : 2026-07-22                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Adds a configurable slash command (default: /greyworld) that loads
+///        a specified GRF archive at runtime via CFileMgr::AddPak.
+///
+///        Hooks the "return TT_UNKNOWN" path at the end of
+///        CSession::GetNoParamTalkType. When the user types the configured
+///        command, the code cave compares the input and calls AddPak to load
+///        the GRF. It then returns 0 (TT_NORMAL) to suppress the "Invalid
+///        Command" feedback. The GRF is loaded and assets become available
+///        on the next map change.
+///
+LoadGRFOnSlashCmd = function(_)
+{
+	/**==================================================================
+	2026-02-19 - DGRF cannot be used here, for two independent reasons:
+
+	  a) 'data.grf' is one of the inline XOR encrypted literals
+	     (Scripts/Support/EncStrings.qjs) and only materialises at runtime
+	     into a lazily initialised buffer, so Exe.FindText fails. The single
+	     plain 'data.grf ' left in .rdata @011AE294 has a trailing space,
+	     and the NUL terminated copy @03DE9F07 sits in the hook cave which
+	     the data search skips.
+	  b) the PUSH DGRF anchors on is gone anyway - the supplied base has
+	     already had the single data.grf AddPak replaced by a cave call:
+
+	       2025-07-16 @00DB98AC        2026-02-19 @00E5F069
+	         mov  ecx, [159D410]         nop
+	         push offset "data.grf"      mov  ecx, [16D5688]   ; g_fileMgr
+	         call 00A88890  ; AddPak     call 03DE9E10         ; cave
+
+	CFileMgr::AddPak itself is untouched and byte for byte the same shape
+	on both builds (only the allocation size and the addresses differ), so
+	identify it by its own prologue instead. That signature matches exactly
+	once on 2025-07-16 (00A88890, the very function DGRF's route lands on)
+	and exactly once on 2026-02-19 (00AE99D0) - measured, no globals and no
+	strings involved.
+	==================================================================**/
+	$$(_, 1.1, `Load DGRF to get CFileMgr and find AddPak`)
+	let AddPak = -1;
+	let MovFMgr = '';   //the 'mov ecx, g_fileMgr' bytes our caves reuse
+	let ggCallPhy = -1; //the one-shot init CALL the startup hook replaces (step 5.1)
+	const dataGrfName = ROC.Post2010 ? "data.grf" : "sdata.grf";
+
+	if (Exe.FindText(dataGrfName) < 0)
+	{
+		$$(_, 1.11, `No usable GRF name string - identify CFileMgr::AddPak by its own prologue`)
+		const sign =
+			" 55 8B EC"             //push ebp ; mov ebp, esp
+		+	" 6A FF"                //push -1
+		+	" 68 ?? ?? ?? ??"       //push <SEH scope table>
+		+	" 64 A1 00 00 00 00"    //mov eax, dword ptr fs:[0]
+		+	" 50"                   //push eax
+		+	" 83 EC 08"             //sub esp, 8
+		+	" 53 56 57"             //push ebx ; push esi ; push edi
+		+	" A1 ?? ?? ?? 0?"       //mov eax, dword ptr [__security_cookie]
+		+	" 33 C5"                //xor eax, ebp
+		+	" 50"                   //push eax
+		+	" 8D 45 F4"             //lea eax, [ebp-0Ch]
+		+	" 64 A3 00 00 00 00"    //mov dword ptr fs:[0], eax
+		+	" 8B D9"                //mov ebx, ecx              ; this = CFileMgr
+		+	" 68 ?? ?? 00 00"       //push <sizeof CGrfPak>     ; 108h on 2025-07-16, 148h on 2026-02-19
+		+	" E8 ?? ?? ?? ??"       //call operator new
+		+	" 8B F8"                //mov edi, eax
+		+	" 83 C4 04"             //add esp, 4
+		;
+
+		const fnAddr = Exe.FindHex(sign);
+		if (fnAddr < 0)
+			throw Error("DGRF - 'data.grf' not found");
+
+		AddPak = Exe.Phy2Vir(fnAddr, CODE);
+
+		/**==============================================================
+		The GRF loading site itself is still needed for two things - the
+		'mov ecx, g_fileMgr' our caves reuse, and the one-shot init CALL
+		the startup hook in step 5.1 replaces. Find it through the
+		encrypted literal (the ciphertext for "data.grf" is stored as
+		inline DWORD moves, so ConfirmEncStrCipher's second route resolves
+		it - measured: exactly one confirmed site, 00E5F04E/00E5F05D):
+
+		  00E5F04E  push <keyHi> / push <keyLo> / push 0 / push 9
+		  00E5F05C  push esi                      ; the buffer
+		  00E5F05D  call 005A45E0                 ; decryptor
+		  00E5F062  add  esp, 14h
+		  00E5F065  mov  byte ptr [esi+9], 0
+		  00E5F069  nop                           ; was 'push esi'
+		  00E5F06A  mov  ecx, [16D5688]           ; g_fileMgr   <- MovFMgr
+		  00E5F06F  call 03DE9E10                 ; the AddPak call
+		  00E5F074  lea  eax, [ebp-50h] / push eax
+		  00E5F078  call 03DE90E0                 ; <- ggCallPhy
+
+		Taking "the 2nd CALL after the g_fileMgr load" rather than a fixed
+		offset keeps this working on both the pre-patched base (where the
+		first CALL goes to the cave) and an untouched one (where it is
+		AddPak followed by the GameGuard init CALL) - in either case what
+		we want is the CALL right after the GRF has been loaded.
+		==============================================================**/
+		$$(_, 1.12, `Locate the GRF loading site through the encrypted literal`)
+		const sites = FindEncStrSites(dataGrfName);
+		if (sites.length !== 1)
+			throw Error("DGRF - 'data.grf' not used");
+
+		const decCall = sites[0].call;
+
+		const movAt = Exe.FindHex(MOV(ECX, POS4WC), decCall + 5, decCall + 5 + 0x20);
+		if (movAt < 0)
+			throw Error("DGRF - g_fileMgr load not found after 'data.grf'");
+
+		MovFMgr = Exe.GetHex(movAt, 5);
+
+		const packCall = Exe.FindHex(CALL(ALLWC), movAt + 5, movAt + 5 + 0x10);
+		if (packCall > 0)
+			ggCallPhy = Exe.FindHex(CALL(ALLWC), packCall + 5, packCall + 5 + 0x10);
+
+		if (ggCallPhy < 0)
+			throw Error("AddPak CALL not found");
+	}
+	else
+	{
+	DGRF.load();
+
+	$$(_, 1.2, `Find the AddPak CALL after data.grf reference`)
+	const refAddr = DGRF.RefAddr;
+	let callAddr = -1;
+
+	/// Try VC14.16 pattern: CALL + MOV EAX, [addr]
+	let pat = CALL(ALLWC) + MOV(EAX, [POS3WC]);
+	callAddr = Exe.FindHex(pat, refAddr + 5, refAddr + 40);
+
+	if (callAddr < 0)
+	{
+		/// Try: CALL + PUSH offset
+		pat = CALL(ALLWC) + PUSH(POS3WC);
+		callAddr = Exe.FindHex(pat, refAddr + 5, refAddr + 40);
+	}
+	if (callAddr < 0)
+	{
+		/// Try: CALL + MOVUPS (seen in some VC14 builds)
+		pat = CALL(ALLWC) + MOVUPS(XMM0, [POS4WC]);
+		callAddr = Exe.FindHex(pat, refAddr + 5, refAddr + 40);
+	}
+	if (callAddr < 0)
+	{
+		/// Try: CALL + CALL + TEST (VC14.29)
+		pat = CALL(ALLWC) + CALL(ALLWC) + TEST(AL, AL);
+		callAddr = Exe.FindHex(pat, refAddr + 5, refAddr + 40);
+	}
+	if (callAddr < 0)
+	{
+		/// Generic fallback: first CALL after data.grf push
+		pat = CALL(ALLWC);
+		callAddr = Exe.FindHex(pat, refAddr + 5, refAddr + 20);
+	}
+	if (callAddr < 0)
+		throw Error("AddPak CALL not found");
+
+	AddPak = Exe.GetTgtAddr(callAddr + 1);
+	MovFMgr = DGRF.MovFMgr;
+	ggCallPhy = callAddr + 5; //the GameGuard init CALL sits right after the AddPak CALL
+	} //end of the 'data.grf' string is available route
+
+	$$(_, 2.1, `Find the ending of CSession::GetNoParamTalkType`)
+
+	/// The function ends with two return paths:
+	///   path A: mov eax, [regA+4] / POP regs / epilogue / retn 4  (match found)
+	///   path B: POP regs / mov eax, 3 / more POPs / epilogue / retn 4  (unknown cmd)
+	///
+	/// We search for path A immediately followed by path B.
+	/// The exact register ordering depends on the compiler version. Maybe check when translating to Forge...
+
+	const cmn =
+		(ROC.HasFP
+	?
+		FP_STOP           //mov esp, ebp
+		                  //pop ebp
+	:
+		''
+	)
+	+	RETN(4)           //retn 4
+	;
+
+	let prefix, suffix, movPos, extraPops;
+
+	switch (Exe.Version)
+	{
+		case 6: //VC6
+		{
+			prefix =
+				MOV(EAX, [R32, 4])
+			+	POP(EDI) + POP(ESI) + POP(EBX)
+			+	cmn
+			;
+			suffix =
+				POP(EDI) + POP(ESI)
+			+	MOV(EAX, 3)
+			+	POP(EBX)
+			+	cmn
+			;
+			movPos = 2;
+			extraPops = POP(EDI) + POP(ESI);
+			break;
+		}
+		case 9: //VC9
+		{
+			prefix =
+				MOV(EAX, [R32, 4])
+			+	POP(EDI) + POP(ESI) + POP(ECX)
+			+	cmn
+			;
+			suffix =
+				POP(EDI)
+			+	MOV(EAX, 3)
+			+	POP(ESI) + POP(ECX)
+			+	cmn
+			;
+			movPos = 1;
+			extraPops = POP(EDI);
+			break;
+		}
+		case 10: //VC10 &
+		case 11: //VC11
+		{
+			prefix =
+				MOV(EAX, [R32, 4])
+			+	cmn
+			;
+			suffix =
+				MOV(EAX, 3)
+			+	cmn
+			;
+			movPos = 0;
+			extraPops = '';
+			break;
+		}
+		default: //VC14.16+
+		{
+			prefix =
+				MOV(EAX, [R32, 4])
+			+	POP(EDI) + POP(ESI)
+			+	cmn
+			;
+			suffix =
+				POP(EDI)
+			+	MOV(EAX, 3)
+			+	POP(ESI)
+			+	cmn
+			;
+			movPos = 1;
+			extraPops = POP(EDI);
+			break;
+		}
+	}
+
+	const funcEnd = Exe.FindHex(prefix + suffix);
+	if (funcEnd < 0)
+		throw Error("GetNoParamTalkType ending not found");
+
+	/// hookAddr = start of the suffix (POP EDI for modern compilers, or MOV EAX,3 directly for VC10/11 where movPos=0).
+	/// hook here so EDI still holds the command string pointer.
+	const hookAddr = funcEnd + prefix.byteCount();
+
+	/// afterHook = virtual address after the consumed suffix bytes: (movPos bytes of POPs + 5 bytes of MOV EAX,3)
+	const afterHookVir = Exe.Phy2Vir(hookAddr + movPos + 5, CODE);
+
+	$$(_, 3.1, `Get user configuration`)
+	const cmdName = Exe.GetUserInput('$greyWorldCmd', D_Text,
+		"Slash command",
+		"Enter the slash command (e.g. /greyworld)",
+		"/greyworld",
+		{minLen: 2, maxLen: 30, saveDefault: true});
+
+	const grfName = Exe.GetUserInput('$greyWorldGrf', D_Text,
+		"GRF filename",
+		"Enter the GRF filename to load (e.g. greyworld.grf)",
+		"greyworld.grf",
+		{minLen: 3, maxLen: 50, saveDefault: true});
+
+	const restoreGrf = Exe.GetUserInput('$greyWorldRestoreGrf', D_Text,
+		"Restore GRF list (comma-separated)",
+		"GRFs to push when disabling, in priority order highest-first (e.g. main.grf,garments.grf,data.grf). All are pushed so the full original GRF stack is restored on top of greyworld.grf.",
+		"main.grf",
+		{minLen: 3, maxLen: 300, saveDefault: true});
+
+	/// Parse comma separated restore list; push in reverse so highest prio GRF ends up on top
+	const restoreGrfs = restoreGrf.split(',').map(s => s.trim()).filter(s => s.length > 0);
+	const restoreGrfsPushOrder = [...restoreGrfs].reverse();
+
+	/// Build an absolute AddPak call: MOV EAX, <AddPak VA>  /  CALL EAX  (7 bytes).
+	/// A relative CALL(Filler(N)) would need a unique displacement per cave position BUT using an absolute call avoids that entirely...
+	const av = AddPak >>> 0;
+	const AbsCallAddPak =
+		' B8'
+	+	' ' + ( av        & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((av >>  8) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((av >> 16) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((av >>> 24)       ).toString(16).padStart(2, '0')
+	+	' FF D0'
+	;
+
+	$$(_, 4.1, `Preserve [EBP+8] — fix for VC14.16+ binary search`)
+
+	/// In VC14.16+ builds, the compiler's sorted array binary search reuses [EBP+8] as a temporary variable (mid-pointer)
+	/// and a post-search string comparison loop advances EDI with ADD EDI,2. Both [EBP+8] and EDI are trashed by the time we reach the hook.
+	/// Only viable Fix: expand the stack frame by 4 bytes and redirect the binary search's two [EBP+8] accesses to the new slot at [EBP-0Ch].
+	/// This does then actually preserve the original command string at [EBP+8].
+
+	if (movPos > 0)
+	{
+		const bsWriteCtx = ' 89 4D 08 8B 09';   //mov [ebp+8], ecx / mov ecx, [ecx]
+		const bsReadCtx  = ' 8B 55 08 83 C8 FF'; //mov edx, [ebp+8] / or eax, -1
+		const bsWrite = Exe.FindHex(bsWriteCtx, funcEnd - 250, funcEnd);
+		const bsRead  = Exe.FindHex(bsReadCtx,  funcEnd - 250, funcEnd);
+
+		if (bsWrite > 0 && bsRead > 0)
+		{
+			$$(_, 4.11, `Found binary search — redirect [EBP+8] temporaries`)
+
+			/// Expand stack frame: SUB ESP, 8 → SUB ESP, 0Ch
+			const prologue = Exe.FindHex(FP_START + SUB(ESP, 8), funcEnd - 250, funcEnd);
+			if (prologue > 0)
+			{
+				Exe.SetInt8(prologue + 5, 0x0C);
+
+				/// Redirect write: MOV [EBP+8], ECX → MOV [EBP-0Ch], ECX
+				Exe.SetInt8(bsWrite + 2, 0xF4);   // disp 08 → F4 (-12)
+
+				/// Redirect read:  MOV EDX, [EBP+8] → MOV EDX, [EBP-0Ch]
+				Exe.SetInt8(bsRead + 2, 0xF4);    // disp 08 → F4 (-12)
+			}
+		}
+	}
+
+	$$(_, 4.15, `Allocate toggle flag byte`)
+
+	/// Pre-allocate a writable byte for the on/off toggle state. Also first /greyworld → AddPak(greyworld.grf), second → AddPak(data.grf)
+	/// to push data.grf back to highest priority (effectively disabling like a charm).
+	const [flagPhy, flagVir] = Exe.Allocate(4);
+	Exe.SetInt32(flagPhy, 0);   // initially OFF
+
+	/// Build raw hex for CMP/MOV flag instructions
+	const fv = flagVir >>> 0;
+	const flagHexStr =
+		' ' + (fv & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((fv >> 8) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((fv >> 16) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((fv >> 24) & 0xFF).toString(16).padStart(2, '0');
+
+	const CmpFlagOff = ` 80 3D${flagHexStr} 00`;   //cmp byte ptr [flag], 0  (7 bytes)
+	const SetFlagOn  = ` C6 05${flagHexStr} 01`;   //mov byte ptr [flag], 1  (7 bytes)
+	const SetFlagOff = ` C6 05${flagHexStr} 00`;   //mov byte ptr [flag], 0  (7 bytes)
+
+	$$(_, 4.17, `Build registry persistence helpers (save + load)`)
+
+	/// Registry API IAT slots
+	const iat_RegCreate = Exe.FindFunc("RegCreateKeyExA",  "ADVAPI32.dll");
+	const iat_RegSet    = Exe.FindFunc("RegSetValueExA",   "ADVAPI32.dll");
+	const iat_RegOpen   = Exe.FindFunc("RegOpenKeyExA",    "ADVAPI32.dll");
+	const iat_RegQuery  = Exe.FindFunc("RegQueryValueExA", "ADVAPI32.dll");
+	const iat_RegClose  = Exe.FindFunc("RegCloseKey",      "ADVAPI32.dll");
+	if (iat_RegCreate < 0 || iat_RegSet < 0 || iat_RegOpen < 0 || iat_RegQuery < 0 || iat_RegClose < 0)
+		throw Error("Registry IAT imports not resolved");
+
+	/// Reuse the client's existing HKCU subkey (as seen in regedit: "HKCU\Software\Gravity\RagnarokOnline") If that works for all... We will see.
+	///
+	/// On 2026 clients the client's own copy is one of the inline XOR encrypted literals
+	/// (decrypted at 00DE409D on 2026-02-19, see Scripts/Support/EncStrings.qjs) so it only
+	/// exists at runtime and Exe.FindText cannot return an address for it. Nothing here needs
+	/// the client's copy specifically though - it is only an lpSubKey argument - so append our
+	/// own literal when the search fails. Same key, same registry location.
+	let regPath = Exe.FindText("Software\\Gravity\\RagnarokOnline");
+	if (regPath < 0)
+		[, regPath] = Exe.AddText("Software\\Gravity\\RagnarokOnline");
+
+	if (!regPath || regPath < 0)
+		throw Error("Registry path 'Software\\Gravity\\RagnarokOnline' not found");
+
+	const HKCU = 0x80000001;
+
+	/// little save helper: writes flagVir byte as a DWORD under value name "GREYWORLD" ---
+	const saveParts = [
+	//0: prolog, copy flag into local DWORD, RegCreateKeyExA
+		FP_START
+	+	SUB(ESP, 8)                              //sub esp, 8   ; [ebp-4]=hKey, [ebp-8]=value
+	+	MOVZX(EAX, BYTE_PTR, [flagVir])
+	+	MOV([EBP, -8], EAX)
+	+	PUSH(0)                                  //lpdwDisposition
+	+	LEA(EAX, [EBP, -4]) + PUSH(EAX)          //phkResult = &hKey
+	+	PUSH(0)                                  //lpSecurityAttributes
+	+	PUSH(0xF003F)                            //samDesired = KEY_ALL_ACCESS
+	+	PUSH(0)                                  //dwOptions
+	+	PUSH(0)                                  //lpClass
+	+	PUSH(0)                                  //Reserved
+	+	PUSH(regPath)                            //lpSubKey
+	+	PUSH(HKCU)                               //hKey
+	+	CALL([iat_RegCreate])
+	+	TEST(EAX, EAX)
+	+	JNE(Filler(1))                           //_fail (skip set/close if open failed)
+
+	,//1: RegSetValueExA + RegCloseKey
+		PUSH(4)                                  //cbData
+	+	LEA(EAX, [EBP, -8]) + PUSH(EAX)          //lpData = &value
+	+	PUSH(4)                                  //dwType = REG_DWORD
+	+	PUSH(0)                                  //Reserved
+	+	PUSH_STR("GREYWORLD")                    //lpValueName
+	+	PUSH([EBP, -4])                          //hKey
+	+	CALL([iat_RegSet])
+	+	PUSH([EBP, -4])
+	+	CALL([iat_RegClose])
+
+	,//2: epilog (_fail)
+		FP_STOP
+	+	RETN()
+	];
+	const saveOffs = MapAddrs(saveParts);
+	const [, saveFnVir] = AutoHook(null, saveParts, {
+		localTgts : { 1 : saveOffs[2] }
+	});
+
+	/// And the littel LOAD helper as well: reads GREYWORLD; if ==1 sets flag + calls AddPak(grfName)
+	const loadParts = [
+	//0: prolog, init dwData=0, RegOpenKeyExA
+		FP_START
+	+	SUB(ESP, 0x10)                           //[ebp-4]=hKey, [ebp-8]=cbData, [ebp-0xC]=dwType, [ebp-0x10]=dwData
+	+	MOV([EBP, -0x10], 0)
+	+	LEA(EAX, [EBP, -4]) + PUSH(EAX)
+	+	PUSH(1)                                  //samDesired = KEY_QUERY_VALUE
+	+	PUSH(0)                                  //ulOptions
+	+	PUSH(regPath)
+	+	PUSH(HKCU)
+	+	CALL([iat_RegOpen])
+	+	TEST(EAX, EAX)
+	+	JNE(Filler(2))                           //_fail (nothing to clean up)
+
+	,//1: RegQueryValueExA + close + value==1 check
+		MOV([EBP, -8], 4)                        //cbData = 4
+	+	LEA(EAX, [EBP, -8])    + PUSH(EAX)
+	+	LEA(EAX, [EBP, -0x10]) + PUSH(EAX)
+	+	LEA(EAX, [EBP, -0xC])  + PUSH(EAX)
+	+	PUSH(0)                                  //Reserved
+	+	PUSH_STR("GREYWORLD")
+	+	PUSH([EBP, -4])
+	+	CALL([iat_RegQuery])
+	+	PUSH([EBP, -4])
+	+	CALL([iat_RegClose])
+	+	CMP([EBP, -0x10], 1)
+	+	JNE(Filler(2))                           //not enabled → _fail
+
+	,//2: apply: set flag byte and push the grey-world GRF
+		SetFlagOn
+	+	PUSH_STR(grfName)
+	+	MovFMgr
+	+	AbsCallAddPak
+
+	,//3: epilog (_fail)
+		FP_STOP
+	+	RETN()
+	];
+	const loadOffs = MapAddrs(loadParts);
+	const [, loadFnVir] = AutoHook(null, loadParts, {
+		localTgts : { 2 : loadOffs[3] }
+	});
+
+	$$(_, 4.2, `Build the code cave`)
+
+	/// Inline chat feedback via fn_A4AD20 (the actual inline chat display function).
+	/// Proven call sequence from TT_UNKNOWN handler at 0x005AE282:
+	///PUSH 0 / PUSH 0 / PUSH 0xFF / PUSH str / PUSH 1 / MOV ECX,0x0131F4E8 / CALL A4AD20
+	/// Thiscall with 5 args: (arg1=1, arg2=str_ptr, arg3=0xFF=white, arg4=0, arg5=0).
+	/// Calleee cleans all 5 args (RETN 14h) — no ADD ESP needed.
+	function chatMsg(msg)
+	{
+		return PUSH(0)                  //arg5 = 0
+		+	PUSH(0)                     //arg4 = 0
+		+	PUSH(0xFFFF)                //arg3 = yellow color (COLORREF 0x0000FFFF = R255 G255 B0)
+		+	PUSH_STR(msg)               //arg2 = string pointer
+		+	PUSH(1)                     //arg1 = 1
+		+	MOV(ECX, 0x0131F4E8)        //mov ecx, UINewChatWnd
+		+	CALL(Filler(6))             //call fn_A4AD20
+		;
+	}
+
+	const msgOn  = "Gray World is enabled - the effect will apply after switching maps or re-logging.";
+	const msgOff = "Gray World is disabled - the effect will apply after switching maps or re-logging.";
+
+	const cmdLen = cmdName.length;
+	let cave, notMatchOff, turnOffOff;
+
+	if (movPos > 0)
+	{
+		/// -> Modern compilers (VC6/9/14.16+) ---
+		/// EDI may have been advanced by the string comparison loop (ADD EDI, 2). So the reload from the now-preserved [EBP+8].
+
+		/// -> Part A: Reload EDI + byte-by-byte compare ---
+		let partA = MOV(EDI, [EBP, 8]);                  //mov edi, [ebp+8]
+		for (let i = 0; i < cmdLen; i++)
+		{
+			const c = cmdName.charCodeAt(i);
+			if (i === 0)
+				partA += CMP(BYTE_PTR, [EDI], c);        //cmp byte ptr [edi], <char>
+			else
+				partA += CMP(BYTE_PTR, [EDI, i], c);     //cmp byte ptr [edi+i], <char>
+
+			partA += JNE(Filler(1));                      //jne _notMatch
+		}
+		/// Null-terminator check -> reject partial prefix matches
+		partA += CMP(BYTE_PTR, [EDI, cmdLen], 0);        //cmp byte ptr [edi+cmdLen], 0
+		partA += JNE(Filler(1));                          //jne _notMatch
+
+		/// -> Part B_check: Toggle state check
+		const partB_check =
+			CmpFlagOff                                    //cmp byte [flag], 0
+		+	JNE(Filler(5))                                //jne _turnOff
+		;
+
+		/// -> Part B_on: Enable — AddPak + chat feedback, then return TT_NORMAL
+		const partB_on =
+			SetFlagOn                                     //mov byte [flag], 1
+		+	CALL(Filler(7))                               //call saveFnVir (persist to registry)
+		+	PUSH_STR(grfName)                             //push <grfName>
+		+	MovFMgr                                  //mov ecx, <g_fileMgr>
+		+	CALL(Filler(3))                               //call CFileMgr::AddPak
+		+	chatMsg(msgOn)                                //display enable feedback in chat
+		+	extraPops                                     //pop edi [+ pop esi for VC6]
+		+	' 33 C0'                                      //xor eax, eax  ; TT_NORMAL
+		+	JMP(Filler(2))                                //jmp _epilogue
+		;
+
+		/// -> Part B_off: Disable -> push all restore GRFs in reverse-priority order (last push = highest priority), then fall through to Part C.
+		///Uses ABSOLUTE MOV EAX + CALL EAX so each call has its OWN correct address.
+		let partB_off =
+			SetFlagOff                                    //mov byte [flag], 0
+		+	CALL(Filler(7))                               //call saveFnVir (persist to registry)
+		;
+		for (const grf of restoreGrfsPushOrder)
+		{
+			partB_off +=
+				PUSH_STR(grf)                             //push <restoreGrf[i]>
+			+	MovFMgr                              //mov ecx, <g_fileMgr>
+			+	AbsCallAddPak                             //mov eax, AddPak; call eax
+			;
+		}
+
+		/// -> Part C: Disable exit — chat feedback, restore regs, return 0
+		const partC =
+			chatMsg(msgOff)                               //display disable feedback in chat
+		+	extraPops                                     //pop edi [+ pop esi for VC6]
+		+	' 33 C0'                                      //xor eax, eax  ; TT_NORMAL
+		+	JMP(Filler(2))                                //jmp _epilogue
+		;
+
+		/// -> Part D: Not-match — restore regs, return 3 
+		const partD =
+			extraPops                                     //pop edi [+ pop esi for VC6]
+		+	MOV(EAX, 3)                                   //mov eax, 3  ; TT_UNKNOWN
+		+	JMP(Filler(2))                                //jmp _epilogue
+		;
+
+		cave = partA + partB_check + partB_on + partB_off + partC + partD;
+		turnOffOff  = (partA + partB_check + partB_on).byteCount();
+		notMatchOff = (partA + partB_check + partB_on + partB_off + partC).byteCount();
+	}
+	else
+	{
+		/// for older compilers (VC10/11): no saved EDI, use [EBP+8]
+		const partA =
+			PUSH(ECX)
+		+	PUSH(EDX)
+		+	MOV(EDX, [EBP, 8])
+		+	CMP(DWORD_PTR, [EDX, 0x10], cmdLen)
+		+	JNE(Filler(1))
+		+	CMP(DWORD_PTR, [EDX, 0x14], 0x10)
+		+	' 72 02'
+		+	MOV(EDX, [EDX])
+		;
+
+		let partB = '';
+		for (let i = 0; i < cmdLen; i++)
+		{
+			const c = cmdName.charCodeAt(i);
+			if (i === 0)
+				partB += CMP(BYTE_PTR, [EDX], c);
+			else
+				partB += CMP(BYTE_PTR, [EDX, i], c);
+
+			partB += JNE(Filler(1));
+		}
+
+		/// Toggle check
+		const partC_check =
+			CmpFlagOff                                    //cmp byte [flag], 0
+		+	JNE(Filler(5))                                //jne _turnOff
+		;
+
+		/// -> Enable: load greyworld.grf, jump to epilogue
+		const partC_on =
+			SetFlagOn                                     //mov byte [flag], 1
+		+	CALL(Filler(7))                               //call saveFnVir (persist to registry)
+		+	PUSH_STR(grfName)                             //push <grfName>
+		+	MovFMgr                                  //mov ecx, <g_fileMgr>
+		+	CALL(Filler(3))                               //call CFileMgr::AddPak
+		+	POP(EDX)
+		+	POP(ECX)
+		+	' 33 C0'                                      //xor eax, eax
+		+	JMP(Filler(2))                                //jmp _epilogue
+		;
+
+		/// -> Disable: push all restore GRFs, fall through to partC2
+		let partC_off =
+			SetFlagOff                                    //mov byte [flag], 0
+		+	CALL(Filler(7))                               //call saveFnVir (persist to registry)
+		;
+		for (const grf of restoreGrfsPushOrder)
+		{
+			partC_off +=
+				PUSH_STR(grf)
+			+	MovFMgr
+			+	AbsCallAddPak
+			;
+		}
+
+		const partC2 =
+			POP(EDX)
+		+	POP(ECX)
+		+	' 33 C0'
+		+	JMP(Filler(2))
+		;
+
+		const partD =
+			POP(EDX)
+		+	POP(ECX)
+		+	MOV(EAX, 3)
+		+	JMP(Filler(2))
+		;
+
+		cave = partA + partB + partC_check + partC_on + partC_off + partC2 + partD;
+		turnOffOff  = (partA + partB + partC_check + partC_on).byteCount();
+		notMatchOff = (partA + partB + partC_check + partC_on + partC_off + partC2).byteCount();
+	}
+
+	$$(_, 4.3, `Install the code cave and hook`)
+	AutoHook(hookAddr, cave,
+	{
+		localTgts : { 1 : notMatchOff, 5 : turnOffOff },
+		targets   : { 2 : afterHookVir, 3 : AddPak, 6 : 0x00A4AD20, 7 : saveFnVir }
+	});
+
+	$$(_, 5.1, `Install startup auto-load hook at the post-AddPak GameGuard CALL`)
+
+	/// Hook the instruction AFTER the original data.grf AddPak CALL , which is the CALL to the GameGuard init wrapper. By hooking THERE (instead of the
+	/// AddPak call itself) we let data.grf load normally first, then do the registry check, THEN perform GameGuard call, so the original
+	/// return value in AL still reaches the TEST AL,AL that follows.
+	/// SO the Original sequence (physical offsets; equivalent VAs shown):
+	///   callAddr+0 : CALL AddPak           <- do NOT touch
+	///   callAddr+5 : CALL GameGuardInit     <- REPLACE with JMP cave
+	///   callAddr+10: TEST AL, AL            <- cave jumps back here
+	///
+	/// This hook runs exactly ONCE per process -> the containing function is only called from the one-shot client init path.
+	///
+	/// [ggCallPhy] was resolved in step 1 - it is callAddr+5 on clients that still have the plain
+	/// 'data.grf' PUSH, and the 2nd CALL after the g_fileMgr load on 2026 clients (see step 1.12).
+
+	const GameGuardInit = Exe.GetTgtAddr(ggCallPhy + 1);
+
+	/// absolute GameGuard call (same trick as AbsCallAddPak — 7 bytes)
+	const gv = GameGuardInit >>> 0;
+	const AbsCallGG =
+		' B8'
+	+	' ' + ( gv        & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((gv >>  8) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((gv >> 16) & 0xFF).toString(16).padStart(2, '0')
+	+	' ' + ((gv >>> 24)       ).toString(16).padStart(2, '0')
+	+	' FF D0'
+	;
+
+	/// build the cave: (registry read -> maybe AddPak greyworld) -> GameGuard -> back and we gucci
+	const startupParts = [
+	//0: prolog + RegOpenKeyExA
+		FP_START
+	+	SUB(ESP, 0x10)                          //[ebp-4]=hKey  [ebp-8]=cb  [ebp-0xC]=type  [ebp-0x10]=data
+	+	MOV([EBP, -0x10], 0)
+	+	LEA(EAX, [EBP, -4]) + PUSH(EAX)
+	+	PUSH(1)                                 //KEY_QUERY_VALUE
+	+	PUSH(0)
+	+	PUSH(regPath)
+	+	PUSH(HKCU)
+	+	CALL([iat_RegOpen])
+	+	TEST(EAX, EAX)
+	+	JNE(Filler(2))                          //open failed -> run GameGuard
+
+	,//1: RegQueryValueExA + close + value==1 check
+		MOV([EBP, -8], 4)
+	+	LEA(EAX, [EBP, -8])    + PUSH(EAX)
+	+	LEA(EAX, [EBP, -0x10]) + PUSH(EAX)
+	+	LEA(EAX, [EBP, -0xC])  + PUSH(EAX)
+	+	PUSH(0)
+	+	PUSH_STR("GREYWORLD")
+	+	PUSH([EBP, -4])
+	+	CALL([iat_RegQuery])
+	+	PUSH([EBP, -4])
+	+	CALL([iat_RegClose])
+	+	CMP([EBP, -0x10], 1)
+	+	JNE(Filler(2))                          //not enabled -> run GameGuard
+
+	,//2: enabled — set flag + AddPak(greyworld.grf) BEFORE GameGuard
+		SetFlagOn
+	+	PUSH_STR(grfName)
+	+	MovFMgr
+	+	AbsCallAddPak
+
+	,//3: epilog -> tear down our frame, then replicate original GameGuard CALL and JMP back
+		FP_STOP
+	+	AbsCallGG
+	+	JMP(Filler(3))
+	];
+	const startupOffs  = MapAddrs(startupParts);
+	const ggAfterVir   = Exe.Phy2Vir(ggCallPhy + 5, CODE);
+
+	AutoHook(ggCallPhy, startupParts,
+	{
+		localTgts : { 2 : startupOffs[3] },
+		targets   : { 3 : ggAfterVir }
+	});
+
+	return true;
+};

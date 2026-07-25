@@ -1,0 +1,51 @@
+FixSelectMenuReset = function(_)
+{
+  const pat1 = "6A 00 6A 00 6A 00 8B 01 6A 00 6A 13 6A 00 FF 90 ?? ?? ?? ?? 33 C0 E9 ?? ?? ?? ?? 8B CF 89 BB ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 75 0B";
+  const pos1 = Exe.FindHex(pat1);
+
+  if (pos1 < 0)
+  {
+    //
+    // 2026-02-19 : the only unpacked base available for this build was dumped from an
+    // already-hooked process, so the JNZ pat1 ends with has already been flipped to JMP.
+    // Bail out with success when the patched form is present.
+    //
+    // Note this also covers pattern2 : the site pat1 patches is itself the *last* match of
+    // pat2 (it reads '85 C0 75 0B / mov ecx,[ebx+0CCh] / call / mov eax,[ebx+0CCh] / mov
+    // ecx,ebx / mov edx,[ebx] / push [eax+4] / push [eax] / call [edx+10h] / xor eax,eax'),
+    // so on an untouched client both halves land on the same byte. Touching the only
+    // remaining pat2 match (the '[ebx+0B8h]' copy) would therefore be a change this patch
+    // never makes, so we stop here instead.
+    //
+    const pat1done = pat1.replace(/75 0B$/, "EB 0B");
+    if (Exe.FindHex(pat1done) > 0)
+      return true;
+
+    throw Error("FixSelectMenuReset pattern1 not found");
+  }
+
+  Exe.SetHex(pos1 + pat1.split(" ").length - 2, "EB 0B");
+
+  const pat2 = "85 C0 75 0B 8B 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B 83 ?? ?? ?? ?? 8B CB 8B 13 FF 70 ?? FF 30 FF 52 ?? 33 C0";
+
+  let pos = Exe.FindHex(pat2);
+  if (pos < 0)
+    throw Error("FixSelectMenuReset pattern2 not found");
+
+  let last = pos;
+
+  while (true)
+  {
+    const next = Exe.FindHex(pat2, last + 1);
+    if (next < 0)
+      break;
+
+    last = next;
+  }
+
+  Exe.SetHex(last + 2, "EB 0B");
+
+  return true;
+};
+
+FixSelectMenuReset .validate = () => Exe.BuildDate >= 20230800;

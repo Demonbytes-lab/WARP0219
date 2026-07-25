@@ -1,0 +1,48 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 CrazyBebop                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Skylove (hex edit), CrazyBebop (WARP patch)           *
+*   Created Date  : 2026-02-25                                             *
+*   Last Modified : 2026-02-25                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Zero out the IndoorRswTable.txt filename string to prevent it
+///        from being loaded. This makes all maps use outdoor lighting
+///        instead of the indoor lighting override.
+///        Same approach as NoCameraLock.qjs (ViewPointTable.txt).
+///
+DisableIndoorRSW = function()
+{
+	Exe.SetInt8(this.TxtAddr, 0);
+	return true;
+};
+
+///
+/// \brief Disable for Unsupported Clients - Check for Reference
+///
+DisableIndoorRSW.validate = function()
+{
+	this.TxtAddr = Exe.FindText("indoorRswTable.txt", PHYSICAL);
+	return (this.TxtAddr > 0);
+};

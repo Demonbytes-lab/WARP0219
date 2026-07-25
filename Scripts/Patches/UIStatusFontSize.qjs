@@ -1,0 +1,41 @@
+UIStatusFontSize = function(_)
+{
+    $$(_, 1.1, 'Prompt for UIStatusWnd font size')
+    const newSize = Exe.GetUserInput(
+        '$statusFontSize', D_Int16, 'UIStatusWnd Font Size',
+        'Font size for UIStatusWnd body text. Range 6..64.',
+        20, {min: 6, max: 64}
+    );
+    if (newSize === false) Cancel("Cancelled");
+
+    $$(_, 2.1, 'Patch each push-imm8 site')
+    const sites = [
+        0x00896fcd, 0x008b3fb1, 0x008b3fda, 0x008b3ff8, 0x008b408e, 0x008b40b7,
+        0x008b40d5, 0x008b67dd, 0x008b683f, 0x008b68e1, 0x008b69dc, 0x008b6a3d,
+        0x008b6a97, 0x008b6aeb, 0x008b6b3f, 0x008b6b99, 0x008b6bf3, 0x008b6c4d,
+        0x008b6cb8, 0x008b6d0c, 0x008b6f7f, 0x008b6fd2, 0x008b7039, 0x008b70fc,
+        0x008b7157, 0x008b71b2, 0x008b720d, 0x008b726f, 0x008b72d1, 0x008b732c
+    ];
+    const newHex = newSize.toString(16).padStart(2, '0').toUpperCase();
+    let patched = 0, skipped = 0;
+    for (const va of sites) {
+        const raw = Exe.Vir2Phy(va, CODE);
+        const cur = Exe.GetHex(raw, 1).replace(/\s+/g, '').toUpperCase();
+        if (cur !== '6A') { skipped++; continue; }
+        Exe.SetHex(raw + 1, newHex);
+        patched++;
+    }
+    if (patched === 0)
+        throw Error('UIStatusFontSize: no sites patched. Exe signature changed?');
+
+    $$(_, 2.3, 'Patch raw code-cave replacements')
+    for (const {va, hex} of [
+        { va: 0x008b32d5, hex: '85FF743D6A006A006A006A086A006A0068B05D03018B86F400000083C011506A0089F1E87327170090909090909090909090909090909090909090909090909090' },
+    ]) {
+        const raw = Exe.Vir2Phy(va, CODE);
+        Exe.SetHex(raw, hex);
+    }
+
+    return true;
+};
+UIStatusFontSize.validate = () => Exe.BuildDate >= 20250000;

@@ -1,0 +1,140 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) 2020-2023 Neo-Mind                                       #
+#   Copyright (C) 2021 Everade                                             #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http:##www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind, Everade                                      #
+#   Created Date  : 2020-11-10                                             #
+#   Last Modified : 2023-03-03                                             #
+#                                                                          #
+############################################################################
+-
+  ######################################
+  desc : Deletion Time - Part 2
+  ######################################
+  find : <25 64 B3 E2 20 25 64 BF F9 20 25 64 C0 CF 20 25 64 BD C3 20 25 64 BA D0 20 25 64 C3 CA 20>
+  replace : "%d/%d/%d - %d:%d:%d"
+  startDate : 20110718
+  startDateRE : 20100817
+-
+  ##############################
+  desc : Message Box
+  #############################
+  find : <B8 DE BD C3 C1 F6 00>
+  replace : "Message"
+  startDate : 20110718
+  startDateRE : 20100000
+-
+  ##################################
+  desc : Game Settings
+  ##################################
+  find : <B0 D4 C0 D3 20 BC B3 C1 A4>
+  replace : "Settings"
+  startDate : 20121010
+-
+  ##############################
+  desc : Total in Cash Shop
+  #############################
+  find : <54 6F 74 61 6C 20 3A 20 25 64 20 C4 B3 BD C3>
+  replace : "Total : %d Cash"
+-
+  #####################################
+  desc : Message Box 2015 - Part 1
+  #####################################
+  find : <B8 DE BC BC C1 F6 00>
+  replace : "Message"
+  startDate : 20150511
+-
+  ####################################################
+  desc : Pet Evolution item amount in non-langtype 0
+  ####################################################
+  find : <25 64 B0 B3 00>
+  replace : "%dea"
+  startDate : 20141020
+-
+  ##############################
+  desc : Tip box - Part 2
+  ##############################
+  find : <B4 DD B1 E2>
+  replace : "Exit"
+-
+  #################################
+  desc : Equipment - Dismount Cart
+  #################################
+  find : <C4 AB C6 AE 20 C7 D8 C1 A6>
+  replace : "Cart Off"
+  startDate : 20190904
+-
+  #################################
+  desc : No Color
+  #################################
+  find : <BF B0 BB F6 C1 A6 B0 C5>
+  replace : "No Color"
+  startDate : 20211100
+-
+  ##################################
+  desc : Game usage time notice - Part 1
+  ##################################
+  find : <25 64 20 BD C3 B0 A3 C0 CC 20 B0 E6 B0 FA C7 DF BD C0 B4 CF B4 D9 2E>
+  replace : "%d time has passed now."
+  startDate : 20130000
+-
+  ##################################
+  desc : Game usage time notice - Part 2
+  ##################################
+  find : <B0 FA B5 B5 C7 D1 20 B0 D4 C0 D3 C0 CC BF EB C0 BA 20 C1 A4 BB F3 C0 FB C0 CE 20 C0 CF BB F3 BB FD C8 B0 BF A1 20 C1 F6 C0 E5 C0 BB 20 C1 D9 20 BC F6 20 C0 D6 BD C0 B4 CF B4 D9 2E>
+  replace : "Excessive gaming can disrupt your normal daily life routine."
+  startDate : 20130000
+-
+  ##################################
+  desc : Macro Report - Part 1
+  ##################################
+  find : <C0 AF C0 FA 20 BD C5 B0 ED>
+  replace : "Report"
+  startDate : 20231115
+-
+  ##################################
+  desc : Macro Report - Part 2
+  ##################################
+  find : <BD C5 B0 ED 20 B3 BB BF EB C0 BB 20 C0 D4 B7 C2 C7 CF BC BC BF E4 2E>
+  replace : "Please enter details."
+  startDate : 20231115
+-
+  ##################################
+  desc : Macro Report - Part 3
+  ##################################
+  find : <BA D2 B9 FD 20 C7 C1 B7 CE B1 D7 B7 A5 20 C0 C7 BD C9 20 BD C5 B0 ED>
+  replace : "Report Illegal Programs"
+  startDate : 20231115
+-
+  ##################################
+  desc : Macro Report - Part 4
+  ##################################
+  find : <B9 F6 B1 D7 20 B9 D7 20 BD C3 BD BA C5 DB 20 BE C7 BF EB>
+  replace : "Bugs and Exploits"
+  startDate : 20231115
+-
+  ##################################
+  desc : Macro Report - Part 5
+  ##################################
+  find : <B1 E2 B4 C9 20 BE C7 BF EB 20 BD C3 20 C1 A6 C0 E7 B8 A6 20 B9 DE C0 BB 20 BC F6 20 C0 D6 BD C0 B4 CF B4 D9 2E>
+  replace : "You can get punished if you abuse it."
+  startDate : 20231115

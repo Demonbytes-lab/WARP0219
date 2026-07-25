@@ -1,0 +1,281 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Ai4rei/AN                                         *
+*   Copyright (C) 2013-2024 Neo-Mind                                       *
+*   Copyright (C) 2018-2024 Andrei Karas (4144)                            *
+*   Copyright (C) 2020-2024 X-EcutiOnner                                   *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Ai4rei/AN, Neo-Mind, Andrei (4144), X-EcutiOnner       *
+*   Created Date  : 2020-11-19                                             *
+*   Last Modified : 2024-01-10                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Skip the call to ProcessFindHack function and the
+///        Conditional Jump after it. Also ignore nProtect tests.
+///
+NoGGuard = function(_)
+{
+	$$(_, 1, `Find where the error string is PUSHed (inside ProcessFindHack)`)
+	let addr = Exe.FindHex( PUSH(this.FmtAddr) );
+	if (addr < 0)
+		throw Error("GameGuard Error string not PUSHed");
+	
+	$$(_, 2.1, `Find the starting location of ProcessFindHack (should be within 0x160-0x1F0 bytes before the PUSH)`)
+	let code =
+		FP_START        //push ebp
+	;	                //mov ebp, esp
+
+	if (Exe.Version >= 10) //VC10+
+	{
+		code +=
+			PUSH(-1)    //push -1
+		+	PUSH()      //push immA
+		;
+		addr = Exe.FindHex(code, addr - (Exe.Version > 11 ? 0x260 : 0x160), addr);
+	}
+	else
+	{
+		code +=
+			SUB(ESP, POS2WC) //sub esp, immB
+		+	PUSH_R           //push regA
+		;
+		addr = Exe.FindHex(code, addr - 0x1A0, addr);
+	}
+	if (addr < 0)
+		throw Error("ProcessFindHack not found");
+
+	$$(_, 2.2, `Set EAX to 1 and return`)
+	Exe.SetHex(addr,
+		XOR(EAX, EAX) //xor eax, eax
+	+	INC(EAX)      //inc eax
+	+	RETN()        //retn
+	);
+
+	$$(_, 3.1, `Find the string 'nProtect GameGuard'`)
+	addr = Exe.FindText("nProtect GameGuard");
+	if (addr < 0)
+		throw Error("'nProtect GameGuard' not found");
+
+	$$(_, 3.2, `Find all locations where it is PUSHed`)
+	code =
+		PUSH(addr)    //push offset "nProtect GameGuard"
+	+	PUSH_R        //push regB
+	+	(Exe.Version >= 10
+	?
+		PUSH([])      //push dword ptr [addr#2]
+	:
+		PUSH_R        //push regC
+	);
+
+	const addrs = Exe.FindHexN(code);
+	if (addrs.isEmpty())
+		throw Error("'nProtect GameGuard' not used");
+	
+	$$(_, 3.3, `Find the conditional jump (JE) before the PUSH (within 50h bytes)`)
+	if (Exe.Version >= 10) //VC10+
+	{
+		code =
+			TEST(AL, AL)                                              //test al, al
+		+	JE(Exe.Version > 11 && Exe.MinorVer < 20 ? POS2WC : WCp)  //je _skip#2
+		+	CALL(Exe.Version > 11 ? ALLWC : NEG3WC)                   //call func#1
+		+	MOV(ECX, EAX)                            //mov ecx, eax
+		+	CALL()                                   //call func#2
+		;
+	}
+	else
+	{
+		code =
+			TEST(EAX, EAX)     //test eax, eax
+		+	JZ(WCp)            //jz short _skip#2
+		+	MOV(R32, [POS3WC]) //mov regA, dword ptr [addr#2]
+		;
+	}
+	
+	const found = addrs.filter( memAddr =>
+	{
+		addr = Exe.FindHex(code, memAddr - 0x100, memAddr);
+
+		$$(_, 3.4, `Change the conditional jump`)
+		if (addr > 0)
+		{
+			Exe.SetJMP(addr + 2);
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	});
+	if (found.isEmpty())
+		throw Error("JE not found before 'nProtect GameGuard' PUSH");
+
+
+	if ( Exe.BuildDate > 20220000 )
+	{
+		$$(_, 4.1, `Look for the second error string`)
+		addr = Exe.FindText("GGHash Init Error");
+		if (addr < 0)
+			throw Error("Second error string missing");
+		
+		$$(_, 4.2, `Find where it gets pushed`)
+		code =
+			CALL(ALLWC)   //call tester
+		+	TEST(AL, AL)  //test al, al
+		+	JNZ(WCp)      //jnz short _proceed
+		+	PUSH_0        //push 0
+		+	PUSH(addr)    //push "GGHash Init Error"
+		+	CALL()        //call ErrMsg
+		;
+		
+		addr = Exe.FindHex(code);
+		if (addr < 0)
+			throw Error("Second error call missing");
+		
+		$$(_, 4.3, `Go inside the testing function`)
+		addr = Exe.GetTgtAddr(addr + 1, PHYSICAL);
+
+		if (ROC.FullVer != 14.29)
+		{
+			$$(_, 4.4, `Find the assignment call`)
+			let parts =
+			[
+				PUSH_EAX       //push eax
+			+	CALL(ALLWC)    //call assigner
+			,
+				TEST(EAX, EAX) //test eax, eax
+			+	JNE(WCp)       //jnz short _proceed#2
+			];
+			let addr2 = Exe.FindHex(parts, addr + 0x60, addr + 0x100);
+			if (addr2 < 0)
+				throw Error("Assignment function call missing");
+		
+			$$(_, 4.5, `NOP it out`)
+			Exe.SetNOPs(addr2, parts.byteCount(0)); //1 for PUSH + 5 for CALL
+		}
+		
+		$$(_, 4.6, `Find the byte comparison now`)
+		parts =
+		[
+			MOV([EBP, WCn], -1)        //mov dword ptr [LOCAL.x], -1
+		,
+			MOV([POS4WC], R32)         //mov dword ptr [addr#1], regA
+		+	TEST(R32, R32)             //test regA, regA
+		+	JZ(WCp)                    //jz short _skip
+		,
+			CMP(BYTE_PTR, [R32, 4], 0) //cmp byte ptr [regA+4], 0
+		];
+		
+		addr += (ROC.FullVer == 14.29 ? 0x50 : 0x120);
+		let addr2 = Exe.FindHex(parts, addr, addr + 0x60);
+		if (addr2 < 0)
+			throw Error("Assignment missing");
+		
+		$$(_, 4.7, `Extract the comparison and convert it to an assignment of 1`)
+		let ins = Instr.FromAddr(addr2 + parts.byteCount(0,1));
+		ins.Codes[0] = 0xC6;
+		ins.MRM.update(1, 0, null);
+		ins.Immd = 1;
+		
+		$$(_, 4.8, `Replace the -1 assignment with this one`)
+		Exe.SetHex(addr2, ins + NOPs(parts.byteCount(0) - ins.Size));
+
+		$$(_, 4.9, `Find Constructor call inside CreateInstance to patch RagHash.dat handling`)
+
+		// Recover CreateInstance physical address (addr was modified in step 4.6)
+		let createInstAddr = addr - (ROC.FullVer == 14.29 ? 0x50 : 0x120);
+
+		// Find: TEST EAX,EAX; JZ short; MOV ECX,EAX; CALL Constructor
+		let ctorPat =
+			TEST(EAX, EAX)    //test eax, eax
+		+	JZ(WCp)            //jz short _allocFail
+		+	MOV(ECX, EAX)      //mov ecx, eax
+		+	CALL(ALLWC)        //call Constructor
+		;
+
+		let ctorCallAddr = Exe.FindHex(ctorPat, createInstAddr, createInstAddr + 0x60);
+		if (ctorCallAddr < 0)
+			throw Error("Constructor call not found in CreateInstance");
+
+		// Get Constructor physical address (CALL opcode at +6, operand at +7)
+		let ctorAddr = Exe.GetTgtAddr(ctorCallAddr + 7, PHYSICAL);
+
+		$$(_, '4.10', `Skip RagHash.dat file loading in Constructor`)
+
+		// After CFileLoader init, Constructor has: TEST EAX,EAX; JZ <near> (skip to return)
+		// The near JZ (0F 84) skips all file loading. Convert to unconditional JMP.
+		// Search past the first TEST+short-JZ (operator_new null check) at offset ~0x60
+		let skipPat =
+			TEST(EAX, EAX)   //test eax, eax
+		+	JZ(POS2WC)        //jz near _skipFileLoading
+		;
+
+		let skipAddr = Exe.FindHex(skipPat, ctorAddr + 0x70, ctorAddr + 0x100);
+		if (skipAddr < 0)
+			throw Error("Constructor RagHash skip point not found");
+
+		// Always skip file loading — prevents stale RagHash.dat crash
+		Exe.SetJMP(skipAddr + 2);
+
+		$$(_, '4.11', `Stub FindByFileHash to always return success`)
+
+		// FindByFileHash is at Constructor + 0x2E0 (thiscall, 1 stack param, RET 4)
+		let fbfhAddr = ctorAddr + 0x2E0;
+
+		// Verify function entry (PUSH EBP; MOV EBP,ESP)
+		if (Exe.FindHex(FP_START, fbfhAddr, fbfhAddr + 3) !== fbfhAddr)
+			throw Error("FindByFileHash entry verification failed");
+
+		Exe.SetHex(fbfhAddr,
+			XOR(EAX, EAX)     //xor eax, eax
+		+	INC(EAX)           //inc eax
+		+	RETN(4)            //ret 4
+		);
+
+		$$(_, '4.12', `Stub FindByHashPair to always return success`)
+
+		// FindByHashPair is at Constructor + 0x3E0 (thiscall, 3 stack params, RET 12)
+		let fbhpAddr = ctorAddr + 0x3E0;
+
+		// Verify function entry
+		if (Exe.FindHex(FP_START, fbhpAddr, fbhpAddr + 3) !== fbhpAddr)
+			throw Error("FindByHashPair entry verification failed");
+
+		Exe.SetHex(fbhpAddr,
+			XOR(EAX, EAX)     //xor eax, eax
+		+	INC(EAX)           //inc eax
+		+	RETN(0xC)          //ret 12
+		);
+	}
+
+	return true;
+};
+
+///
+/// \brief Disable for unsupported clients
+///
+NoGGuard.validate = function()
+{
+	this.FmtAddr = Exe.FindText("GameGuard Error: %lu");
+	return (this.FmtAddr > 0);
+};
+

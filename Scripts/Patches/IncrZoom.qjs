@@ -1,0 +1,78 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Shinryo                                           *
+*   Copyright (C) 2020-2024 Andrei Karas (4144)                            *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Modify Zoom to specific percentages (25%, 50%, 75%, Maximum)
+///
+IncrZoom = function(_) {
+    $$(_, 1.1, `Search for the default zoom pattern in the executable`)
+
+    // The default FAR_DIST literal sits in the float pool immediately before 640.0
+    // ("00 00 20 44"), which is why the two trailing zero bytes are part of the pattern -
+    // they anchor the match to the pool entry and keep it unique.
+    //
+    // 2025-07-16 ships FAR_DIST = 480.0 ("00 00 F0 43").
+    // The 2026-02-19 client (BuildDate 20260211) raised the stock zoom-out limit to 730.0
+    // ("00 80 36 44"); 480.0 is no longer present in the pool at all. Verified: the FAR_DIST
+    // selector at 0x006C4631 loads 0x010DD250 (= 730.0) and 730.0 occurs exactly once in
+    // the whole file, at that pool slot, followed by 640.0. So the 6 byte pattern stays unique.
+    //
+    // Older default is tried first so pre-2026 clients behave exactly as before.
+    const findPatterns = [
+        "00 00 F0 43 00 00", // FAR_DIST = 480.0 (<= 2025 clients)
+        "00 80 36 44 00 00"  // FAR_DIST = 730.0 (2026+ clients)
+    ];
+
+    let addr = -1;
+    for (const findPattern of findPatterns) {
+        addr = Exe.FindHex(findPattern, Exe.GetSectBegin(DATA), Exe.FileSize);
+        if (addr < 0) //some builds report a DATA section start that is past the float pool
+            addr = Exe.FindHex(findPattern, 0, Exe.FileSize);
+
+        if (addr > 0)
+            break;
+    }
+
+    if (addr < 0) {
+        throw Error("Pattern '00 00 F0 43 00 00' not found in the executable.");
+    }
+
+    $$(_, 1.2, `Select the zoom value to be applied`)
+
+    // IEEE-754 values in hexadecimal
+    const newZoom = this.Data.get(_); // Selected zoom value
+
+    if (!newZoom) {
+        throw Error("Zoom not specified or invalid value.");
+    }
+
+    $$(_, 1.3, `Replace the pattern with the new value`)
+    Exe.SetHex(addr, newZoom);
+
+    console.log(`Zoom changed to: ${newZoom}`);
+    return true;
+};
+
+///
+/// \brief Wrappers for individual patches
+///
+Zoom25Percent = IncrZoom;
+Zoom50Percent = IncrZoom;
+Zoom75Percent = IncrZoom;
+ZoomMax       = IncrZoom;
+
+///
+/// \brief Mapping of zoom values to the specified percentages
+///
+IncrZoom.Data = MakeMap(
+    'Zoom25Percent', "00 00 00 43 00 00",
+    'Zoom50Percent', "00 00 FF 43 00 00",
+    'Zoom75Percent', "00 80 36 44 00 00",
+    'ZoomMax',       "00 00 99 44 00 00" 
+);

@@ -1,0 +1,209 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 DemonBytes (NoxaraRO)                               *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Purpose : Make NPCs with a PC-class view honor UNPC_DEADSIT.           *
+*             The client translator skips the posture field ([esi+1124h])  *
+*             for anything whose actor-type is not PC, so a CCharacterNpc  *
+*             (PC-view NPC) never renders sitting even when the server     *
+*             sets setunitdata(.npc_gid, UNPC_DEADSIT, 2). This patch      *
+*             inserts a vtable check before the actor-type gate so that    *
+*             CCharacterNpc instances fall through to the PC posture path. *
+*             All other actors retain original behavior.                   *
+*                                                                          *
+\**************************************************************************/
+
+NpcDeadSit = function(_)
+{
+	$$(_, 1.1, `Locate the actor-type gate in the NPC translator`)
+	const ctx =
+		CMP(EAX, EDI)           //cmp eax, edi            ; compare actor-type with PC
+	+	JNE(ALLWC)              //jne <npcBranch>         ; non-PC bypass
+	+	MOV(EAX, [ESI, 0x1124]) //mov eax, [esi+1124h]    ; PC posture state
+	+	CMP(EAX, 2)             //cmp eax, 2
+	;
+
+	const ctxPhy = Exe.FindHex(ctx);
+	if (ctxPhy < 0)
+		throw Error("Actor-type gate not found");
+
+	const gatePhy      = ctxPhy + 2;
+	const fallVir      = Exe.Phy2Vir(gatePhy + 6, CODE);
+	const npcBranchVir = Exe.GetTgtAddr(gatePhy + 2);
+
+	$$(_, 1.2, `Resolve CCharacterNpc vtable via RTTI walk`)
+	const namePhy = Exe.FindText(".?AVCCharacterNpc@@", PHYSICAL, false);
+	if (namePhy <= 0)
+		throw Error("CCharacterNpc RTTI name missing");
+
+	const nameVir = Exe.Phy2Vir(namePhy);
+	const tdVir   = nameVir - 8;
+
+	let vtableVir = 0;
+	let diagTdRefs = 0, diagColsTried = 0, diagColRefs = 0;
+	const tdRefs = Exe.FindHexN(tdVir.toHex(4));
+	diagTdRefs = tdRefs.length;
+	for (const refPhy of tdRefs)
+	{
+		const colPhy = refPhy - 0xC;
+		if (colPhy < 0) continue;
+		if (Exe.GetUint32(colPhy) !== 0) continue;        // 32-bit COL sig is 0
+		diagColsTried++;
+
+		const colVir = Exe.Phy2Vir(colPhy);
+		if (colVir <= 0) continue;
+
+		const colRefs = Exe.FindHexN(colVir.toHex(4));
+		diagColRefs += colRefs.length;
+		for (const crPhy of colRefs)
+		{
+			const candidate = Exe.Phy2Vir(crPhy + 4);
+			if (candidate > 0)
+			{
+				vtableVir = candidate;
+				break;
+			}
+		}
+		if (vtableVir) break;
+	}
+
+	// Fallback: VA from static RTTI analysis of 2025-07-16_Ragexe_175220998.
+	// Safe because validate() already confirmed .?AVCCharacterNpc@@ is present,
+	// which is an exe-specific marker.
+	if (!vtableVir)
+		vtableVir = 0x00FD8CE8;
+
+	$$(_, 2.1, `Build code cave`)
+	// Cave layout (27 bytes):
+	//   +00  9C                  pushfd                         ; save ZF from original cmp eax,edi
+	//   +01  81 3E <vt32>        cmp dword ptr [esi], <vtable>
+	//   +07  74 <rel8 F1>        je short _isCharNpc
+	//   +09  9D                  popfd                          ; restore original ZF
+	//   +0A  0F 85 <rel32 F2>    jne <npcBranchVir>             ; original jne target
+	//   +10  E9 <rel32 F3>       jmp <fallVir>                  ; original fall-through
+	//  _isCharNpc:
+	//   +15  9D                  popfd                          ; restore ZF (unused)
+	//   +16  E9 <rel32 F3>       jmp <fallVir>                  ; force PC posture path
+	const isCharNpcOff = 0x15;
+
+	const cave =
+		' 9C'
+	+	' 81 3E' + vtableVir.toHex(4)
+	+	' 74' + Filler(1, 1)
+	+	' 9D'
+	+	' 0F 85' + Filler(2)
+	+	' E9' + Filler(3)
+	+	' 9D'
+	+	' E9' + Filler(3)
+	;
+
+	$$(_, 2.2, `Install translator gate`)
+	Exe.BeginTag("NpcDeadSit", true);
+	AutoHook(gatePhy, cave, {
+		localTgts : { 1 : isCharNpcOff },
+		targets   : { 2 : npcBranchVir, 3 : fallVir },
+		nops      : 1   // 6-byte jne → 5-byte jmp + NOP
+	});
+
+	$$(_, 3.1, `Locate SetPosture pose-list null-check`)
+	// Inside SetPosture @ 0x00B38C10:
+	//   8B 91 00 11 00 00   mov edx, [ecx+0x1100]    ; pose list (null on CCharacterNpc)
+	//   85 D2               test edx, edx
+	//   75 06               jne +6   -> skip-write branch
+	//   B8 9F FF FF FF      mov eax, 0xffffff9f      ; negative "error" code
+	//   C3                  ret                      ; caller treats al!=0 as success,
+	//                                                ; but [ecx+0x1124] was never written.
+	const spPat = "8B 91 00 11 00 00 85 D2 75 06 B8 9F FF FF FF C3";
+	const spPhy = Exe.FindHex(spPat);
+	if (spPhy < 0)
+		throw Error("SetPosture null-check pattern not found");
+
+	const errRetPhy = spPhy + 10;  // skip 6+2+2 = points at MOV EAX,-0x61
+
+	$$(_, 3.2, `Build fallback cave: write [ecx+0x1124]=eax, return 1`)
+	const spCave =
+		" 89 81 24 11 00 00"   // mov [ecx+0x1124], eax
+	+	" B8 01 00 00 00"      // mov eax, 1  (caller tests al, non-zero = success)
+	+	" C3"                  // ret
+	;
+
+	$$(_, 3.3, `Install SetPosture fallback — replace 6-byte MOV EAX,-0x61 + RET with JMP cave + NOP`)
+	AutoHook(errRetPhy, spCave, {
+		nops : 1   // 5-byte jmp + 1 NOP = 6 bytes (matches original)
+	});
+
+	return true;  // Step 4 disabled — vtable/offset assumptions are wrong; investigating
+
+	$$(_, 4.1, `Locate idle_unit inner-handler arg-convergence point`)
+	// The 0x9FF parser (FN 0x00CF5AF0) pushes 33 args to the inner handler
+	// (FN 0x00CF6390). Packet byte [esi+0x44] (the 'state' / dead_sit byte)
+	// is stored in caller local [ebp-0x54] and pushed 6th in code order, so
+	// with cdecl (first-pushed = highest stack) it lands at callee arg
+	// [ebp+0x74]. (The byte [ebp+0x88] that the callee reads at 0xCF6735 is
+	// actually [esi+0x51] = isBoss, not state.)
+	//
+	// Inside 0xCF6390, the state byte is loaded once at 0xCF64B5:
+	//   movzx eax, byte [ebp+0x74]
+	//   mov   [ebp-0x74], eax        ; stored locally and then NEVER read
+	// i.e. the client ignores the state byte for NPCs entirely.
+	//
+	// Hook point is the 6-byte instruction at 0xCF6735 (mov al, [ebp+0x88]),
+	// because at this program point both actor-code paths have converged and
+	// EDI = actor pointer:
+	//   - existing-actor path:  set at 0xCF6589 (mov edi, eax) then jmp cf6735
+	//   - new-actor path:       set at 0xCF66EF (mov edi, [ebp-0x18])
+	//
+	// Cave: read the state byte from [ebp+0x74] into eax, write it to
+	// [edi+0x1124] (the PC-class posture field), then run the original
+	// `mov al, [ebp+0x88]` so downstream isBoss handling is unchanged.
+	// The pattern matches TWO inner handlers in this client — presumably the
+	// 0x9FF idle_unit inner (FN 0x00CF6390, pattern at 0xCF6735) and the
+	// 0x9FE spawn_unit inner (FN 0x00CF4030, pattern at 0xCF43E7). Both
+	// discard the state byte identically, so we patch both.
+	const convergePat =
+		" 8A 85 88 00 00 00"          // mov al, byte [ebp+0x88]   ; hook target
+	+	" 0F 57 C0"                    // xorps xmm0, xmm0
+	+	" 66 0F 13 45 E4"              // movlpd [ebp-0x1c], xmm0
+	+	" 84 C0"                       // test al, al
+	;
+	const convergePhys = Exe.FindHexN(convergePat);
+	if (!convergePhys || convergePhys.length === 0)
+		throw Error("idle_unit inner-handler state-load site not found");
+
+	$$(_, 4.2, `Build graft cave — CCharacterNpc-gated state write`)
+	// Cave (24 bytes; tail JMP appended by AutoHook):
+	//   +00  81 3F <vt32>             cmp [edi], <CCharacterNpc vtable>
+	//   +06  75 0A                    jne _skip
+	//   +08  0F B6 45 74              movzx eax, byte [ebp+0x74]   ; state byte
+	//   +0C  89 87 24 11 00 00        mov [edi+0x1124], eax        ; posture field
+	//  _skip: (+12)
+	//   +12  8A 85 88 00 00 00        mov al, byte [ebp+0x88]      ; original insn
+	// These inner handlers process ALL actor types (PCs, mobs, items, skills);
+	// [edi+0x1124] is only valid on CCharacterXxx structs. Without this gate the
+	// write crashes when edi points to a shorter actor struct (mobs etc.).
+	const idleCave =
+		" 81 3F" + vtableVir.toHex(4)
+	+	" 75 0A"
+	+	" 0F B6 45 74"
+	+	" 89 87 24 11 00 00"
+	+	" 8A 85 88 00 00 00"
+	;
+
+	$$(_, 4.3, `Install graft at each match — replace 6-byte mov with JMP cave + NOP`)
+	for (const hookPhy of convergePhys)
+	{
+		AutoHook(hookPhy, idleCave, {
+			nops : 1
+		});
+	}
+
+	return true;
+};
+
+NpcDeadSit.validate = () =>
+	Exe.BuildDate >= 20250000 &&
+	Exe.FindText(".?AVCCharacterNpc@@", PHYSICAL, false) > 0;

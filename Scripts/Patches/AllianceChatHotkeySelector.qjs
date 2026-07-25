@@ -1,0 +1,58 @@
+
+AllianceChatHotkeySelector = function(_) {
+
+	$$( _, 1.1, "Finding Alliance Chat hotkey compare..." );
+
+	let addr = Exe.FindHex("80 BD 84 FE FF FF 23", 0, Exe.FileSize);
+	if (addr < 0)
+		throw "Alliance chat pattern not found.";
+
+	const table = [
+		["^", 0x5E], // Recommended
+		["~", 0x7E],
+		["!", 0x21],
+		["#", 0x23], // Default
+		["%", 0x25],
+		["*", 0x2A]
+	];
+
+	let display = table.map(([k, dec]) => {
+		let hex = dec.toString(16).toUpperCase();
+		let label = "";
+		if (k === "#") label = "  (Default)";
+		if (k === "^") label = "  (Recommended)";
+		return k + "\t[0x" + hex + "]" + label;
+	});
+
+	let defaultIndex = table.findIndex(([k]) => k === "#");
+	let defaultDisplay = display[defaultIndex];
+
+	let selDisplay = Exe.GetUserInput(
+		'$AllianceChatHotkey',
+		D_Choice,
+		"Alliance Chat Hotkey",
+		"Select the key used to send messages to Alliance Chat.",
+		defaultDisplay,
+		{ choices: display }
+	);
+
+	if (!selDisplay) {
+		$$( _, 1.1, "Alliance Chat hotkey change cancelled." );
+		return false;
+	}
+
+	let sel = selDisplay[0];
+
+	let row = table.find(([k]) => k === sel);
+	if (!row)
+		throw "Selected symbol not in table.";
+
+	let imm = row[1];
+
+	Exe.SetBytes(addr, [0x80, 0xBD, 0x84, 0xFE, 0xFF, 0xFF, imm]);
+
+	$$( _, 1.1, "Alliance Chat hotkey set to '" + sel + "' (0x" + imm.toString(16).toUpperCase() + ")" );
+	return true;
+};
+
+AllianceChatHotkeySelector.validate = () => Exe.BuildDate >= 20230607;

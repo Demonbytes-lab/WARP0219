@@ -1,0 +1,335 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Shinryo                                           *
+*   Copyright (C) 2020-2024 Secret                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Shinryo, Secret                                        *
+*   Created Date  : 2020-11-12                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Fix the switch and jmp in InitClientInfo and InitDefaultClientInfo functions to make sure both SelectKoreaClientInfo and SelectClientInfo are called
+///
+CallKoreaClientInfo = function(_)
+{
+	$$(_, 1.1, `Find the error string`)
+	const addr = Exe.FindText("Unknown ServiceType !!!");
+
+	$$(_, 1.15, `From the 2026 clients the literal is XOR encrypted - handled separately`)
+	if (addr < 0)
+		return CallKoreaClientInfo_Enc(_);
+
+	$$(_, 1.2, `Find all locations where it is PUSHed`)
+	const addrs = Exe.FindHexN( PUSH(addr) );
+	if (addrs.isEmpty())
+		throw Error("Message string not used");
+
+	$$(_, 1.3, `Prepare codes to be used in the foreach loop`)
+	const codes =
+	[//0
+		MOVZX(R32, BYTE_PTR, [R32, POS3WC]) //movzx regA, byte ptr [regB + baseAddr]
+	+	JMP([4, R32, POS3WC])               //jmp dword ptr [regA*4 + tblAddr]
+
+	,//1
+		MOV(R8, BYTE_PTR, [R32, POS3WC])    //mov reg8_A, byte ptr [regB + baseAddr] ; Pattern for really old clients
+	+	JMP([4, R32, POS3WC])               //jmp dword ptr [regA*4 + tblAddr]
+
+	,//2
+		CALL(ALLWC)                         //call <SelectKoreaClientInfo>
+	+	JMP(ALLWC)                          //jmp _skip -> Skip calling SelectClientInfo
+	+	PUSH_0                              //push 0
+	+	CALL()                              //call <SelectClientInfo>
+
+	,//3
+		JNE(WCp)                            //jne short _skip -> Skip calling SelectKoreaClientInfo ; Pattern for 2017+ clients C/o Secret
+	+	CALL(POS3WC)                        //call <SelectKoreaClientInfo>
+	+	JMP(POS3WC)                         //jmp addr2
+	+	PUSH_0                              //push 0
+
+	,//4
+		JNE(POS2WC)                         //jne _skip -> Skip running SelectKoreaClientInfo code ; Pattern for VC14.16 clients
+	+	MOV(R32, [POS4WC])                  //mov regC, dword ptr [addr] ; start of SelectKoreaClientInfo
+	
+	,//5
+		JNE(POS2WC)                         //jne _skip -> Skip running SelectKoreaClientInfo code ; Pattern for VC14.16 clients
+	+	JMP(7)                              //jmp _noassign
+	+	MOV(BYTE_PTR, [POS4WC], 0)          //mov byte ptr [addr], 0
+
+	];
+
+	addrs.forEach( (memAddr, idx) =>
+	{
+		const __ = `${_} [${idx}]`;
+
+
+		$$(__, 2.1, `Find the Switch case jump before each PUSH`)
+		let csize, addr;
+		if (Exe.Version === 6) //VC6
+		{
+			csize = codes.byteCount(1);
+			addr = Exe.FindHex(codes[1], memAddr - 0x50, memAddr);
+		}
+		else
+		{
+			csize = codes.byteCount(0);
+			const delta = Exe.Version < 14 ? 0x50 : Exe.MinorVer < 20 ? 0x200 : 0x280;
+			addr = Exe.FindHex(codes[0], memAddr - delta, memAddr);
+		}
+		if (addr < 0 && Exe.Version >= 14) //Fallback: larger search range for 2025+ clients where distance exceeds 0x280
+			addr = Exe.FindHex(codes[0], memAddr - 0x300, memAddr);
+
+		if (addr < 0)
+			throw Error(`Switch Case not found for No.${idx + 1}`);
+
+		$$(__, 2.2, `Point addr to code after the JMP`)
+		addr += csize;
+
+		$$(__, 2.3, `Extract the tblAddr`)
+		const tblAddr = Exe.Vir2Phy(Exe.GetUint32(addr - 4), CODE);
+
+		$$(__, 2.3, `Make the 2nd entry in the table the same as first, so that all valid langtypes will use same case as 0 i.e. Korea`)
+		Exe.SetUint32(tblAddr + 4, Exe.GetUint32(tblAddr));
+
+		$$(__, 2.4, `Find the Select*Info calls between the push and the Jump`)
+		let nopCount = 5; //enough to NOP out the 2nd JMP
+		let nopLoc = 5;
+		let addr2 = Exe.FindHex(codes[2], addr, tblAddr);
+
+		if (addr2 < 0)
+		{
+			nopCount = 2;
+			code = codes[2].replace( JMP(ALLWC), JMP(WCp) ); //change second 'jmp' to 'jmp short'
+			addr2 = Exe.FindHex(code, addr, tblAddr);
+		}
+		if (addr2 < 0)
+		{
+			nopLoc = 0;
+			if (Exe.Version > 11)
+			{
+				nopCount = 6;
+				addr2 = Exe.FindHex(codes[4], addr, tblAddr);
+			}
+			else if (Exe.BuildDate > 20170000)
+			{
+				nopCount = 2;
+				addr2 = Exe.FindHex(codes[3], addr, tblAddr);
+			}
+		}
+		if (addr2 < 0 && Exe.Version > 11)
+		{
+			nopCount = 6;
+			addr2 = Exe.FindHex(codes[5], addr, tblAddr);
+		}
+		let inlineKoreaFix = false;
+		let jmpSize = 0; //size of the JMP instruction being NOPed (2 for short, 5 for near)
+		if (addr2 < 0)
+		{
+			//Pattern for 2025+ clients: Korea code is inlined (not a CALL), inner switch
+			//subcases exit with JMPs that skip SelectClientInfo. Find the last JMP
+			//right before PUSH 0; CALL <SelectClientInfo>
+
+			//Try short JMP first (EB xx)
+			nopLoc = 0;
+			nopCount = 2;
+			jmpSize = 2;
+			addr2 = Exe.FindHex(JMP(WCp) + PUSH_0 + CALL(ALLWC), addr, tblAddr);
+
+			//Try near JMP (E9 xx xx xx xx) if short didn't match
+			if (addr2 < 0)
+			{
+				nopCount = 5;
+				jmpSize = 5;
+				addr2 = Exe.FindHex(JMP(ALLWC) + PUSH_0 + CALL(ALLWC), addr, tblAddr);
+			}
+
+			if (addr2 >= 0)
+				inlineKoreaFix = true;
+		}
+		if (addr2 < 0)
+			throw Error(`Select*Info CALLs not found for No.${idx + 1}`);
+
+		$$(__, 2.5, `NOP out the JMP/JZ`)
+
+		//For inline Korea pattern, save the original skip target before NOPing
+		let origSkipTarget = -1;
+		if (inlineKoreaFix)
+		{
+			if (jmpSize === 2)
+				origSkipTarget = addr2 + 2 + Exe.GetInt8(addr2 + 1);
+			else
+				origSkipTarget = addr2 + 5 + Exe.GetInt32(addr2 + 1);
+		}
+
+		Exe.SetNOPs(addr2 + nopLoc, nopCount);
+
+		if (inlineKoreaFix)
+		{
+			$$(__, 2.6, `Redirect other inner case exit JMPs to SelectClientInfo`)
+			const selectAddr = addr2 + jmpSize; //PUSH 0 location (right after NOPed JMP)
+
+			//Redirect near JMPs (E9 xx xx xx xx) that target origSkipTarget
+			for (let s = addr; s < addr2; )
+			{
+				const j = Exe.FindHex("E9", s, addr2);
+				if (j < 0) break;
+				if (j + 5 + Exe.GetInt32(j + 1) === origSkipTarget)
+					Exe.SetInt32(j + 1, selectAddr - (j + 5));
+				s = j + 1;
+			}
+
+			//Redirect short JMPs (EB xx) that target origSkipTarget
+			for (let s = addr; s < addr2; )
+			{
+				const j = Exe.FindHex("EB", s, addr2);
+				if (j < 0) break;
+				if (j + 2 + Exe.GetInt8(j + 1) === origSkipTarget)
+				{
+					const newOff = selectAddr - (j + 2);
+					if (newOff >= -128 && newOff <= 127)
+						Exe.SetInt8(j + 1, newOff);
+				}
+				s = j + 1;
+			}
+		}
+	});
+
+	return true;
+};
+
+///
+/// \brief Variant for the 2026+ clients, where "Unknown ServiceType !!!" only
+///        exists as XOR encrypted data (see Scripts/Support/EncStrings.qjs).
+///
+/// Measured on 2026-02-19 (BuildDate 20260211):
+///
+///   InitClientInfo        0x00ACFF90  switch 0x00ACFFD7  jmpTbl 0x00AD0DD8
+///        [0] 0x00ACFFE5  90 90 90 90 90 + jmp 0x00AD00A1
+///        [1] 0x00AD00A1  call 0x00AD1780
+///        [2] 0x00ACFFEF  "Unknown ServiceType !!!" -> falls into 0x00AD00A1
+///
+///   InitDefaultClientInfo 0x00AD0E10  switch 0x00AD0E43  jmpTbl 0x00AD0F34
+///        [0] 0x00AD0E51  call 0x00AD1C90 (SelectKoreaClientInfo) + jmp 0x00AD0F13
+///        [1] 0x00AD0F13  call 0x00AD1780
+///        [2] 0x00AD0E5B  "Unknown ServiceType !!!" -> falls into 0x00AD0F13
+///
+///   SelectKoreaClientInfo = 0x00AD1C90 (hardcodes port '6900' and
+///                           'http://www.ragnarok.co.kr')
+///   SelectClientInfo      = 0x00AD2A00 (the clientinfo tag reader - holds
+///                           'servicetype' / 'sakray' / 'hideaccountlist' /
+///                           'extendedslot' / 'korea' / 'america' / ...)
+///
+/// Two differences to the older clients, both verified against the pristine
+/// unpack of the original Ragexe (identical there, so they are properties of
+/// the client and not of our tooling):
+///
+///  1. Neither function contains "PUSH 0 ; CALL SelectClientInfo" any more.
+///     SelectClientInfo has exactly one caller left, a thunk at 0x03DE8327 in
+///     the injected clientinfo reader section, which runs unconditionally
+///     before InitClientInfo is entered (call at 0x03DE914E). So the half of
+///     this patch that NOPs the JMP "so that SelectClientInfo runs too" has no
+///     target - that end state is already installed. This is proven per site
+///     rather than assumed: the korea case is only accepted when it ends in a
+///     near JMP that lands on the *same* continuation the other langtypes use.
+///
+///  2. The CALL to SelectKoreaClientInfo inside InitClientInfo is already
+///     replaced by 5 NOPs in the client itself. Restoring it is deliberately
+///     NOT done here: it would run after the injected reader has parsed
+///     clientinfo.xml and would overwrite the parsed address/port with the
+///     hardcoded korean ones. That is a behavioural decision for the client
+///     base, not something this patch may take silently.
+///
+/// What is left is the jump table fix, which is applied to both switches and
+/// is exactly step 2.3 of the plain-text path.
+///
+CallKoreaClientInfo_Enc = function(_)
+{
+	$$(_, 3.1, `Find the encrypted "Unknown ServiceType !!!" argument setups`)
+	const sites = FindEncStrSites("Unknown ServiceType !!!");
+	if (sites.isEmpty())
+		throw Error("Message string not found (neither plain nor encrypted)");
+
+	$$(_, 3.2, `Prepare the switch dispatch pattern (same shape as the old clients)`)
+	const code =
+		MOVZX(R32, BYTE_PTR, [R32, POS4WC]) //movzx regA, byte ptr [regB + idxTbl]
+	+	JMP([4, R32, POS4WC])               //jmp dword ptr [regA*4 + jmpTbl]
+	;
+	const csize = code.byteCount();
+
+	sites.forEach( (site, idx) =>
+	{
+		const __ = `${_} [enc ${idx}]`;
+
+		$$(__, 3.3, `Find the switch dispatch before the message`)
+		const swAddr = Exe.FindHex(code, site.push - 0x300, site.push);
+		if (swAddr < 0)
+			throw Error(`Switch Case not found for No.${idx + 1}`);
+
+		$$(__, 3.4, `Extract the jump table and the first two case targets`)
+		const caseAddr = swAddr + csize;
+		const tblAddr  = Exe.Vir2Phy(Exe.GetUint32(caseAddr - 4), CODE);
+		if (tblAddr < 0)
+			throw Error(`Jump table is not inside the image for No.${idx + 1}`);
+
+		const case0 = Exe.GetUint32(tblAddr);
+		const case1 = Exe.GetUint32(tblAddr + 4);
+
+		$$(__, 3.5, `The first case must be the code right after the dispatch (korea)`)
+		if (Exe.Phy2Vir(caseAddr, CODE) !== case0)
+			throw Error(`Unexpected jump table layout for No.${idx + 1}`);
+
+		$$(__, 3.6, `Prove the korea case already merges into the other langtypes' path,
+		             i.e. nothing has to be NOPed for SelectClientInfo to be reached`)
+		let jmpAddr = -1;
+		for (let p = caseAddr; p < caseAddr + 0x40; p++)
+		{
+			if (Exe.GetUint8(p) === 0xE9 &&
+				Exe.Phy2Vir(p, CODE) + 5 + Exe.GetInt32(p + 1) === case1)
+			{
+				jmpAddr = p;
+				break;
+			}
+		}
+		if (jmpAddr < 0)
+			throw Error(`Korea case does not merge with the default case for No.${idx + 1}`);
+
+		$$(__, 3.7, `Refuse to guess if a Select*Info CALL is still present in the korea case`)
+		if (Exe.FindHex(PUSH_0 + CALL(ALLWC), caseAddr, jmpAddr) >= 0)
+			throw Error(`Unhandled Select*Info CALL inside the korea case for No.${idx + 1}`);
+
+		$$(__, 3.8, `Make the 2nd entry the same as the first so every valid langtype
+		             takes the korea case`)
+		if (case1 !== case0)
+			Exe.SetUint32(tblAddr + 4, case0);
+	});
+
+	return true;
+};
+
+/*
+ Note:
+-------
+ Gravity has their clientinfo hardcoded and seperated the initialization, screw "em.. :(
+ SelectKoreaClientInfo() has for example global letiables like g_extended_slot set
+ which aren"t set by SelectClientInfo(). Just call both functions will fix this as the
+ changes from SelectKoreaClientInfo() will persist and overwritten by SelectClientInfo().
+*/

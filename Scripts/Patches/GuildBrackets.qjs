@@ -1,0 +1,62 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2024 Shinryo                                           *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Shinryo                                                *
+*   Created Date  : 2020-11-11                                             *
+*   Last Modified : 2024-08-09                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Change the ¡º ¡» brackets to ( )
+///
+GuildBrackets = function(_)
+{
+	$$(_, 1, `Find the format string used for displaying Guild names`)
+	const addr = Exe.FindText("%s\xA1\xBA%s\xA1\xBB", PHYSICAL);
+
+	/**==================================================================
+	The base exe used for the 2026 port is a dump of a client that was
+	already running with the runtime patcher attached, so this exact
+	substitution is baked into it - the CP949 form is gone and the slot
+	(physical 00D32BD8 on 2026-02-19) already reads "%s (%s) ".
+	Detect the finished form and stop; re-writing it would be a no-op
+	and reporting 'not found' would be misleading.
+	==================================================================**/
+	if (addr < 0)
+	{
+		if (Exe.FindText("%s (%s) ", PHYSICAL) > 0)
+		{
+			$$(_, 1.1, `Brackets already converted - nothing to do`)
+			return true;
+		}
+
+		throw Error("Format string not found");
+	}
+
+	$$(_, 2, `Change the brackets to regular parentheses + blanks`)
+	///     (since we are converting from UNICODE to ASCII, one
+	///     extra byte would be there for each korean character)
+	Exe.SetText(addr, "%s (%s) ");
+
+	return true;
+};

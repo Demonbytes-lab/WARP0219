@@ -1,0 +1,124 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2013-2024 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Neo-Mind                                               *
+*   Created Date  : 2020-11-12                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Change the conditional jump to JMP after Langtype comparison in
+///        the OnLogin callback which skips loading HelpMsgStr
+///
+NoHelpMsg = function(_)
+{
+	$$(_, 1.1, `Ensure the LANGTYPE is loaded`)
+	LANGTYPE.load();
+
+	$$(_, 1.2, `Find the Unique PUSHes after the comparison . This is same for all clients`)
+	let code =
+		PUSH(0x0E)      //push 0Eh
+	+	(Exe.Version === 6
+	?
+		MOV(EAX, [ECX]) //mov eax, dword ptr [ecx] ; for VC6
+	:
+		''
+	)
+	+	PUSH(0x2A)      //push 2Ah
+	;
+
+	let addr = Exe.FindHex(code);
+	if (addr < 0 && Exe.BuildDate > 20190900)
+	{
+		addr = Exe.FindHex(code.replace(PUSH(0x0E), PUSH(0x0D))); //for latest clients
+	}
+
+	if (addr < 0)
+		throw Error("Signature PUSHes missing");
+
+	$$(_, 1.3, `Find the Langtype comparison before the PUSHes`)
+	code =
+		CMP([LANGTYPE], Exe.Version < 11 ? R32 : 0)  //cmp dword ptr [g_serviceType], regA / 0
+	+	JNE(WCp)                                     //jne short _skip
+	;
+
+	let cmpAddr = Exe.FindHex(code, addr - 0x20, addr);
+	let jmpOfs = code.byteCount() - 2; //distance from the match to the conditional jump
+	let done = false;
+
+	if (cmpAddr < 0 && Exe.Version >= 11)
+	{
+		$$(_, 1.4, `2026-02-19 client (BuildDate 20260211). Step 1.2 only pins down the message PUSHes,
+		            and 'push 0Eh ; push 2Ah' occurs ~900 times in this build, so the very first hit is
+		            nowhere near the OnLogin callback and the ranged search above can never succeed.
+		            Re-anchor on the whole callback shape in one pattern instead - it is unique:
+		              cmp [g_serviceType],0 / jne / mov regA,[g_modeMgr] / push 0 x3 / mov eax,[regA] /
+		              push 0Eh / push 2Ah
+		            The global is wildcarded (does not depend on LANGTYPE) and the conditional jump is
+		            allowed to already be an unconditional JMP, because the supplied base ships this
+		            site pre-flipped (same displacement) - i.e. the patch is already in effect there`)
+		const shape = (jmp, id) =>
+			CMP([POS4WC], 0)   //cmp dword ptr [g_serviceType], 0
+		+	jmp                //jne short _skip  (or already jmp short _skip)
+		+	MOV(R32, [POS4WC]) //mov regA, dword ptr [g_modeMgr]
+		+	PUSH_0             //push 0
+		+	PUSH_0             //push 0
+		+	PUSH_0             //push 0
+		+	MOV(EAX, [R32])    //mov eax, dword ptr [regA]
+		+	PUSH(id)           //push 0Eh / 0Dh
+		+	PUSH(0x2A)         //push 2Ah
+		;
+
+		jmpOfs = CMP([POS4WC], 0).byteCount();
+
+		for (const id of [0x0E, 0x0D])
+		{
+			cmpAddr = Exe.FindHex(shape(JNE(WCp), id));
+			if (cmpAddr > 0)
+				break;
+
+			cmpAddr = Exe.FindHex(shape(JMP(WCp), id));
+			if (cmpAddr > 0)
+			{
+				done = true;
+				break;
+			}
+		}
+	}
+
+	if (cmpAddr < 0)
+		throw Error("Langtype comparison not found");
+
+	if (!done)
+	{
+		$$(_, 2, `Change the conditional jump`)
+		Exe.SetJMP(cmpAddr + jmpOfs);
+	}
+
+	return true;
+};
+
+///
+/// \brief Enable only for 2010+ clients
+///
+NoHelpMsg.validate = IsPost2010;

@@ -1,0 +1,78 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) 2022-2023 Neo-Mind                                       #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind                                               #
+#   Created Date  : 2022-09-29                                             #
+#   Last Modified : 2025-01-18                                             #
+#                                                                          #
+############################################################################
+
+##===========================================================================##
+## NOTE : Do not put the "Lua files\" prefix in either original or new name. ##
+##        It is auto-added in code.                                          ##
+##===========================================================================##
+
+Swap:
+    DataInfo\AddRandomOption_F: cls\addrandomoption_f
+
+## Put all the lua file names to be loaded after the original in this group
+LoadAfter:
+    # hat effect overrides
+    HatEffectInfo\HatEffectInfo: cls\hateffectinfo
+    
+    # headgear overrides
+    DataInfo\accName: cls\accname
+    DataInfo\AccessoryId: cls\accessoryid
+    DataInfo\TB_Layer_Priority: cls\tb_layer_priority
+    
+    # lapine overrides
+    datainfo\LapineDdukDDakBox: cls\lapineddukddakbox
+    datainfo\LapineUpgradeBox: cls\lapineupgradebox
+    
+    # NPC & Mob overrides
+    DataInfo\NPCIdentity: cls\npcidentity
+    DataInfo\jobName: cls\jobname
+    DataInfo\PetInfo: cls\petinfo
+    DataInfo\ShadowTable: cls\shadowtable
+    
+    # Random option overrides
+    DataInfo\AddRandomOptionNameTable: cls\randomoption
+    
+    # Robe overrides
+    DataInfo\SpriteRobeId: cls\spriterobeid
+    DataInfo\SpriteRobeName: cls\spriterobename
+    transparentItem\transparentItem: cls\transparentitem
+    
+    # World view overrides
+    worldviewdata\worldviewdata_Language: cls\worldviewdata_language
+    worldviewdata\worldviewdata_list: cls\worldviewdata_list
+    worldviewdata\worldviewdata_table: cls\worldviewdata_table
+    
+    # Skillinfoz overrides
+    SkillInfoz\SkillID: cls\skillid
+    SkillInfoz\SkillInfoList: cls\skillinfolist
+    SkillInfoz\SkillDescript: cls\skilldescript
+    SkillInfoz\skilltreeview: cls\skilltreeview
+
+    # Other Table overrides 
+    SignBoardList: cls\signboardlist
+    DataInfo\WeaponTable: cls\weapontable

@@ -1,0 +1,385 @@
+/************************************************************************
+*                                                                       *
+*   Author(s)     : Victor Hugo                                         *
+*   Created Date  : 2026-01-27                                          *
+*   Last Modified : 2026-01-27                                          *
+*                                                                       *
+ ***********************************************************************/
+
+FixSkillbarReset = function(_)
+{
+
+	function Step(msg) { $$(_ + msg); }
+	function Fail(stepMsg, why) { throw Error(stepMsg + " -> " + why); }
+
+	function RequireFindHex(stepMsg, pattern, start) {
+		Step(stepMsg);
+		const addr = (start !== undefined) ? Exe.FindHex(pattern, start) : Exe.FindHex(pattern);
+		if (addr < 0) Fail(stepMsg, "Reference pattern missing");
+		return addr;
+	}
+
+	function RequireByte(stepMsg, addr, expected) {
+		Step(stepMsg);
+		const v = Exe.GetUint8(addr);
+		if (v !== expected)
+			Fail(stepMsg, "Verification failed (expected 0x" + expected.toString(16) + ", got 0x" + v.toString(16) + ")");
+	}
+
+	function RequireNonZero(stepMsg, v) {
+		Step(stepMsg);
+		if (!v) Fail(stepMsg, "Resolved value is 0/null");
+	}
+
+	function ResolveUiMgrFromShowWindow(stepPrefix, showWindowFuncVir) {
+		Step(stepPrefix + " - Resolve uiMgr from ShowWindow body signature");
+
+		const showPhy = Exe.Vir2Phy(showWindowFuncVir, CODE);
+		if (showPhy <= 0) Fail(stepPrefix, "Vir2Phy(showWindowFuncVir) failed");
+
+		const sig =
+			" B9 ?? ?? ?? ??"
+		+   " 6A 24"
+		+   " 89 BE ?? ?? ?? ??"
+		+   " E8 ?? ?? ?? ??"
+		;
+
+		const m = Exe.FindHex(sig, showPhy);
+		if (m < 0 || m > showPhy + 0x600)
+			Fail(stepPrefix, "Signature not found near ShowWindow prologue");
+
+		const uiMgr = Exe.GetUint32(m + 1);
+		if (!uiMgr) Fail(stepPrefix, "Extracted uiMgr is 0");
+
+		Step(stepPrefix + " - uiMgr(from body) = 0x" + uiMgr.toString(16));
+		return uiMgr;
+	}
+
+	function ResolveGetWindowCallsite() {
+		Step("2.0 - Resolve GetWindow callsite (multi-pattern)");
+
+		const tries = [
+			{ name: "A", pat: " 6A 24 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0", kind: "6A" },
+			{ name: "B", pat: " 68 24 00 00 00 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0", kind: "68" },
+			{ name: "C", pat: " 6A 24 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 F8 00", kind: "6A_cmp" },
+			{ name: "D", pat: " 68 24 00 00 00 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 F8 00", kind: "68_cmp" },
+		];
+
+		for (const t of tries) {
+			Step("2.1 - Try GetWindow callsite pattern " + t.name);
+			const m = Exe.FindHex(t.pat);
+			if (m < 0) continue;
+
+			let uiAddr = 0;
+			let callIns = 0;
+
+			if (t.kind.startsWith("6A")) {
+				uiAddr  = Exe.GetUint32(m + 3);
+				callIns = m + 7;
+			} else {
+				uiAddr  = Exe.GetUint32(m + 6);
+				callIns = m + 10;
+			}
+
+			if (!uiAddr) {
+				Step("2.2 - Pattern " + t.name + " matched but uiAddr == 0");
+				continue;
+			}
+
+			const rel = Exe.GetInt32(callIns + 1);
+			const nextVir = Exe.Phy2Vir(callIns + 5, CODE);
+			const getWindowFuncVir = nextVir + rel;
+
+			if (!getWindowFuncVir) {
+				Step("2.2 - Pattern " + t.name + " matched but getWindowFuncVir == 0");
+				continue;
+			}
+
+			Step("2.3 - GetWindow callsite OK (" + t.name + ")");
+			Step("2.4 - uiMgr(from get-site) = 0x" + uiAddr.toString(16));
+			Step("2.5 - getWindowFuncVir     = 0x" + getWindowFuncVir.toString(16));
+			return { uiAddr, getWindowFuncVir };
+		}
+
+		return null;
+	}
+
+	function ResolveShowWindowCallsite() {
+		Step("3.0 - Resolve SlotShow + ShowWindow callsite (multi-pattern)");
+
+		const tries = [
+			{ name: "A", pat: " FF 35 ?? ?? ?? ?? 6A 24 B9 ?? ?? ?? ?? E8 ?? ?? ?? ??", kind: "FF35_6A" },
+			{ name: "B", pat: " FF 35 ?? ?? ?? ?? 68 24 00 00 00 B9 ?? ?? ?? ?? E8 ?? ?? ?? ??", kind: "FF35_68" },
+			{ name: "C", pat: " A1 ?? ?? ?? ?? 50 6A 24 B9 ?? ?? ?? ?? E8 ?? ?? ?? ??", kind: "A1_6A" },
+			{ name: "D", pat: " A1 ?? ?? ?? ?? 50 68 24 00 00 00 B9 ?? ?? ?? ?? E8 ?? ?? ?? ??", kind: "A1_68" },
+		];
+
+		for (const t of tries) {
+			Step("3.1 - Try ShowWindow callsite pattern " + t.name);
+			const m = Exe.FindHex(t.pat);
+			if (m < 0) continue;
+
+			let slotShowAddr = 0;
+			let uiAddr = 0;
+			let callIns = 0;
+
+			if (t.kind.startsWith("FF35")) {
+
+				slotShowAddr = Exe.GetUint32(m + 2);
+
+				if (t.kind.endsWith("6A")) {
+
+					uiAddr  = Exe.GetUint32(m + 9);
+					callIns = m + 13;
+				} else {
+
+					uiAddr  = Exe.GetUint32(m + 12);
+					callIns = m + 16;
+				}
+			} else {
+
+				slotShowAddr = Exe.GetUint32(m + 1);
+
+				if (t.kind.endsWith("6A")) {
+
+					uiAddr  = Exe.GetUint32(m + 8);
+					callIns = m + 12;
+				} else {
+
+					uiAddr  = Exe.GetUint32(m + 11);
+					callIns = m + 15;
+				}
+			}
+
+			if (!slotShowAddr || !uiAddr) {
+				Step("3.2 - Pattern " + t.name + " matched but extract failed (slotShow/ui == 0)");
+				continue;
+			}
+
+			const rel = Exe.GetInt32(callIns + 1);
+			const nextVir = Exe.Phy2Vir(callIns + 5, CODE);
+			const showWindowFuncVir = nextVir + rel;
+
+			if (!showWindowFuncVir) {
+				Step("3.2 - Pattern " + t.name + " matched but showWindowFuncVir == 0");
+				continue;
+			}
+
+			Step("3.3 - ShowWindow callsite OK (" + t.name + ")");
+			Step("3.4 - slotShowAddr       = 0x" + slotShowAddr.toString(16));
+			Step("3.5 - uiMgr(from show-site)=0x" + uiAddr.toString(16));
+			Step("3.6 - showWindowFuncVir   = 0x" + showWindowFuncVir.toString(16));
+			return { slotShowAddr, uiAddr, showWindowFuncVir };
+		}
+
+		Step("3.9 - ShowWindow callsite not found (all patterns failed)");
+		return null;
+	}
+
+	Step("1.0 - Start FixSkillbarReset");
+
+	const hookPattern =
+		" 84 C0"
+	+   " 74 04"
+	+   " B0 01"
+	+   " EB 07"
+	+   " 8B CE"
+	+   " E8 ?? ?? ?? ??"
+	+   " A2 ?? ?? ?? ??"
+	+   " 8B 4D ??"
+	+   " 64 89 0D 00 00 00 00"
+	;
+
+	//
+	// 2026-02-19 : the only unpacked base available for this build was dumped from an
+	// already-hooked process. The 'A2 <ItemSlotActive>' this patch replaces has already
+	// been overwritten with the 5 byte JMP into our own code cave, so hookPattern can
+	// never match again. Recognise the cave (its first four parts, which no compiler
+	// emits: MOV [imm32], AL / PUSHAD / PUSHFD / MOV ECX, imm32 / TEST ECX, ECX / JNZ+5 /
+	// JMP) and report success instead of installing a second copy of the hook.
+	// Verified absent from 2025-07-16, present exactly once here.
+	//
+	const alreadyDone =
+		" A2 ?? ?? ?? ??"     //mov byte ptr [ItemSlotActive], al
+	+	PUSHAD + " 9C"        //pushad ; pushfd
+	+	MOV(ECX, ALLWC)       //mov ecx, <uiMgr>
+	+	TEST(ECX, ECX)        //test ecx, ecx
+	+	" 75 05"              //jnz short +5
+	+	JMP(ALLWC)            //jmp <exit>
+	;
+	//The cave lives outside the code section, so the search has to span the whole file
+	if (Exe.FindHex(alreadyDone, 0, Exe.FileSize) > 0)
+	{
+		Step("1.0b - Hook already present in the client (dumped base) - nothing to do");
+		return true;
+	}
+
+	const pat = RequireFindHex("1.1 - Find hookPattern (A2 ItemSlotActive)", hookPattern);
+
+	const hookAddr = pat + 15;
+	RequireByte("1.2 - Verify hook opcode is A2", hookAddr, 0xA2);
+
+	const itemSlotActiveAddr = Exe.GetUint32(hookAddr + 1);
+	RequireNonZero("1.3 - Resolve itemSlotActiveAddr", itemSlotActiveAddr);
+
+	const hookAddrVir = Exe.Phy2Vir(hookAddr, CODE);
+	RequireNonZero("1.4 - Resolve hookAddrVir", hookAddrVir);
+
+	const retAddrVir = hookAddrVir + 5;
+	Step("1.5 - retAddrVir = 0x" + retAddrVir.toString(16));
+
+
+	const getInfo = ResolveGetWindowCallsite();
+	if (!getInfo) Fail("2.9 - Resolve GetWindow callsite", "Reference pattern missing");
+
+	const getWindowFuncVir = getInfo.getWindowFuncVir;
+	let uiMgr_fromGet = getInfo.uiAddr;
+
+
+	let slotShowAddr = 0;
+	let showWindowFuncVir = 0;
+	let uiMgr_final = 0;
+
+	const showInfo = ResolveShowWindowCallsite();
+	if (showInfo) {
+		slotShowAddr = showInfo.slotShowAddr;
+		showWindowFuncVir = showInfo.showWindowFuncVir;
+		uiMgr_final = showInfo.uiAddr;
+
+
+		try {
+			const uiBody = ResolveUiMgrFromShowWindow("3.7", showWindowFuncVir);
+			if (uiBody && uiBody !== uiMgr_final) {
+				Step("3.8 - WARN: uiMgr mismatch (show-site=0x" + uiMgr_final.toString(16) + ", body=0x" + uiBody.toString(16) + ")");
+
+			}
+		} catch (e) {
+			Step("3.8 - INFO: uiMgr body signature not available (ignore)");
+		}
+	} else {
+
+		const slotShowPattern = " 89 35 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8B CB";
+		const slotShowMatch = RequireFindHex("3.F1 - Fallback: Find SlotShow pattern (89 35 ... 68 ... 8B CB)", slotShowPattern);
+		slotShowAddr = Exe.GetUint32(slotShowMatch + 2);
+		RequireNonZero("3.F2 - Fallback: Resolve slotShowAddr", slotShowAddr);
+
+		Step("3.F3 - Fallback: Resolve ShowWindow function by prologue signature");
+		const funcPrologue = " 55 8B EC 51 8B 45 08 53 56 8B F1 57 83 F8 2E";
+		const m = Exe.FindHex(funcPrologue);
+		if (m < 0) Fail("3.F3", "ShowWindow prologue signature missing");
+
+		showWindowFuncVir = Exe.Phy2Vir(m, CODE);
+		RequireNonZero("3.F4 - Fallback: showWindowFuncVir", showWindowFuncVir);
+
+		uiMgr_final = ResolveUiMgrFromShowWindow("3.F5", showWindowFuncVir);
+		RequireNonZero("3.F6 - Fallback: uiMgr_final", uiMgr_final);
+	}
+
+	if (!uiMgr_final) uiMgr_final = uiMgr_fromGet;
+	RequireNonZero("3.10 - Final uiMgr_final", uiMgr_final);
+
+	Step("3.11 - slotShowAddr     = 0x" + slotShowAddr.toString(16));
+	Step("3.12 - showWindowFuncVir= 0x" + showWindowFuncVir.toString(16));
+	Step("3.13 - uiMgr_final      = 0x" + uiMgr_final.toString(16));
+
+	const slotXAddr = slotShowAddr - 0x10;
+	Step("3.14 - slotXAddr assumed = slotShowAddr - 0x10 => 0x" + slotXAddr.toString(16));
+
+	Step("4.0 - Build injected code (AutoHook)");
+
+	const parts = [
+		(" A2" + itemSlotActiveAddr.toHex()),
+
+		PUSHAD + " 9C",
+
+		MOV(ECX, uiMgr_final),
+
+		TEST(ECX, ECX)
+	+	JNZ(Filler(1, 1))
+	+	JMP(Filler(2)),
+
+		PUSH(0x24)
+	+	CALL(Filler(3)),
+
+		TEST(EAX, EAX)
+	+	JNZ(Filler(4, 1))
+	+	JMP(Filler(2)),
+
+		MOV(ESI, EAX),
+
+		MOV(EAX, [slotXAddr])       + MOV([ESI, 0x1C], EAX)
+	+	MOV(EAX, [slotXAddr + 4])   + MOV([ESI, 0x20], EAX)
+	+	MOV(EAX, [slotXAddr + 8])   + MOV([ESI, 0x14], EAX)
+	+	MOV(EAX, [slotXAddr + 0xC]) + MOV([ESI, 0x18], EAX),
+
+		PUSH([slotShowAddr])
+	+	PUSH(0x24)
+	+	MOV(ECX, uiMgr_final)
+	+	CALL(Filler(6)),
+
+		MOV(EAX, [ESI])
+	+	MOV(EDX, [EAX, 0x94])
+	+	MOV(ECX, ESI)
+	+	PUSH(0) + PUSH(0) + PUSH(0)
+	+	PUSH(slotXAddr)
+	+	PUSH(0x22)
+	+	PUSH(0)
+	+	CALL(EDX),
+
+		MOV(EAX, [ESI])
+	+	MOV(EDX, [EAX, 0x94])
+	+	MOV(ECX, ESI)
+	+	PUSH(0) + PUSH(0) + PUSH(0)
+
+	+	(" 80 3D" + itemSlotActiveAddr.toHex() + " 00")
+
+	+	" 74 07"
+
+	+	PUSH(0x24C)
+
+	+	" EB 05"
+
+	+	PUSH(0x24D)
+
+	+	PUSH(6)
+	+	PUSH(0)
+	+	CALL(EDX),
+
+		" 9D" + POPAD + JMP(Filler(7)),
+	];
+
+	const code = parts.join('');
+
+	const addrs0 = MapAddrs(0, parts);
+	const exitOff = addrs0[parts.length - 1];
+	Step("4.1 - exitOff(local) = 0x" + exitOff.toString(16));
+
+	Step("4.2 - AutoHook install");
+	AutoHook(hookAddr, code,
+	{
+
+		values: {
+			'1,1': 0x05,
+			'4,1': 0x05,
+		},
+
+		localTgts: {
+			start: 0,
+			2: exitOff,
+		},
+
+		targets: {
+			3: getWindowFuncVir,
+			6: showWindowFuncVir,
+			7: retAddrVir,
+		},
+
+		isCall: false,
+		nops: 0,
+	});
+
+	Step("4.3 - Done");
+	return true;
+};
+
+FixSkillbarReset.validate = () => Exe.BuildDate >= 20230800;

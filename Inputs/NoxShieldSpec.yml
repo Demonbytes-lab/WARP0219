@@ -1,0 +1,19 @@
+############################################################################
+#  NoxShield DLL Specification for WARP CustomDLL patch                    #
+#                                                                          #
+#  This adds NoxShield.dll to the client exe's PE import table.            #
+#  When the exe loads, Windows will REQUIRE NoxShield.dll to be present    #
+#  — if it's missing, the exe won't start ("DLL not found" error).         #
+#  This is the anti-removal mechanism: the DLL is a hard dependency.       #
+#                                                                          #
+#  Usage:                                                                  #
+#    1. Enable "CustomDLL" patch in WARP                                   #
+#    2. When prompted, point to this file                                  #
+#    3. Place NoxShield.dll next to the patched exe                        #
+############################################################################
+
+-
+  Name: NoxShield.dll
+  Funcs:
+    - Name: "NoxShield_Init"
+    - Name: "NoxShield_Version"

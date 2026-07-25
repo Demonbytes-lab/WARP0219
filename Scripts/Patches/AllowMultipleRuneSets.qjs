@@ -1,0 +1,193 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 NoxaraRO                                            *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+\**************************************************************************/
+
+//
+// AllowMultipleRuneSets
+//
+// Two rune-activate flows exist in the 2025 client:
+//
+// Gate A) Legacy CZ_PC_REPLACE_RUNESET (0x0B63) in fn_C76400.
+//         Two already-active JNE gates are NOPed (harmless if the flow
+//         is unused on rAthena, which sends 0x0BD0 instead).
+//
+// Gate B) rAthena CZ_SET_ACTIVATE_RUNE (0x0BD0) routed through the UI
+//         dispatcher fn_7E6130. At 0x7E6153 the select/activate case
+//         calls a getter (mov al,[ecx+0Ch]) on the clicked set object.
+//         When another set is already equipped that flag is 0, the code
+//         runs a state-reset on [edi+0x90] and then pops the
+//         "Please remove the equipped Rune Set" dialog (msgstring 0xFCF).
+//         Because the dialog path already invokes the same commit
+//         (fn_7E5B30) as the success path, simply flipping the JNE to
+//         JMP would skip that reset and crash inside commit on stale
+//         state (observed: EIP in data at 0xC859xxxx).
+//
+//         Cave strategy:
+//           1. Replace the entire reset + dialog block
+//              [0x7E6163 .. 0x7E61A5] (0x43 = 67 bytes) with a 5-byte
+//              JMP to a cave + NOP padding.
+//           2. Cave:
+//                a. PUSH [edi+0x7c]                 (save set ptr)
+//                b. replicate the original reset
+//                   (mov ecx,[edi+0x90]; mov eax,[ecx];
+//                    mov [ecx+0x30],0; call [eax+0x98])
+//                c. repush saved set ptr as 0x0BD0 packet arg and
+//                   call the packet writer at fn_7305D0 with
+//                   this = [0x1318A10] (same convention used by the
+//                   native send at 0x7E634E).
+//                d. pop the saved slot and JMP to 0x7E61A6 (commit).
+//
+//         Result: the "Please remove" dialog never fires, state is
+//         kept consistent by the replicated reset, and the activate
+//         packet is injected so the server sees the new set.
+//
+// Tested on: 2025-07-16_Ragexe_175220998 unpacked
+//
+
+AllowMultipleRuneSets = function(_)
+{
+    //
+    // Gate A — legacy 0x0B63 flow
+    //
+    $$(_, 1, `Locate legacy 0x0B63 activate-send gates`);
+
+    const patA =
+          "83 7D F4 00"            // CMP [EBP-0Ch], 0
+        + " 75 52"                 // JNE (gate #1)
+        + " 83 3D 70 F7 31 01 00"  // CMP [0x131F770], 0
+        + " 75 49"                 // JNE
+        + " 68 69 01 00 00"        // PUSH 0x169
+        + " B9 E8 F4 31 01"        // MOV ECX, UIRuneObj singleton
+        + " E8 ?? ?? ?? ??"        // CALL fn_A47B90
+        + " 85 C0"                 // TEST EAX, EAX
+        + " 75 36"                 // JNE (gate #2)
+        ;
+
+    const offA = Exe.FindHex(patA);
+    if (offA < 0)
+        throw Error("AllowMultipleRuneSets: legacy 0x0B63 gate pattern not found");
+
+    $$(_, 2, `Gate A found at 0x${offA.toString(16)} — NOPing both JNEs`);
+    Exe.SetHex(offA +  4, "90 90");
+    Exe.SetHex(offA + 32, "90 90");
+
+    //
+    // Gate B — rAthena 0x0BD0 flow (cave injection)
+    //
+    $$(_, 3, `Locate 0x0BD0 select/activate gate in fn_7E6130`);
+
+    // Unique anchor spanning the gate + reset + first bytes of dialog
+    //   8B 4F 7C         mov ecx, [edi+0x7c]
+    //   85 C9            test ecx, ecx
+    //   74 53            je   <exit>
+    //   E8 ?? ?? ?? ??   call fn_72EEA0 (returns [ecx+0xc])
+    //   84 C0            test al, al
+    //   75 43            jne  +0x43 → 0x7E61A6 (commit)
+    //   8B 8F 90 00 00 00   mov ecx, [edi+0x90]
+    //   8B 01               mov eax, [ecx]
+    //   C7 41 30 00 00 00 00   mov [ecx+0x30], 0
+    //   FF 90 98 00 00 00   call [eax+0x98]
+    const patB =
+          "8B 4F 7C"                              // +0
+        + " 85 C9"                                // +3
+        + " 74 53"                                // +5
+        + " E8 ?? ?? ?? ??"                       // +7
+        + " 84 C0"                                // +12
+        + " 75 43"                                // +14
+        + " 8B 8F 90 00 00 00"                    // +16 (resetBlock start — this is 0x7E6163)
+        + " 8B 01"                                // +22
+        + " C7 41 30 00 00 00 00"                 // +24
+        + " FF 90 98 00 00 00"                    // +31
+        ;
+
+    const gateAnchor = Exe.FindHex(patB);
+    if (gateAnchor < 0)
+        throw Error("AllowMultipleRuneSets: 0x0BD0 gate anchor not found");
+
+    $$(_, 4, `Gate B anchor found at 0x${gateAnchor.toString(16)}`);
+
+    // File offsets of the region we will rewrite
+    const resetStartPhy = gateAnchor + 16;    // VA 0x7E6163
+    const regionEndPhy  = gateAnchor + 16 + 0x43; // VA 0x7E61A6 (commit call site — untouched)
+    const regionLen     = regionEndPhy - resetStartPhy; // 0x43 = 67
+
+    // Virtual addresses of the three key points
+    const resetStartVir = Exe.Phy2Vir(resetStartPhy, CODE);
+    const commitVir     = Exe.Phy2Vir(regionEndPhy,  CODE);
+
+    //
+    // Find the native 0x0BD0 send site to pull the packet-writer
+    // singleton address and function address at runtime of the patch.
+    //
+    //   8B 0D ?? ?? ?? ??   mov ecx, [writerSingleton]
+    //   6A FF               push -1
+    //   FF 77 7C            push [edi+0x7c]
+    //   68 D0 0B 00 00      push 0xbd0
+    //   E8 ?? ?? ?? ??      call fn_7305D0
+    //
+    $$(_, 5, `Resolve packet writer function + singleton from native send site`);
+
+    const sendPat =
+          "8B 0D ?? ?? ?? ??"   // +0
+        + " 6A FF"              // +6
+        + " FF 77 7C"           // +8
+        + " 68 D0 0B 00 00"     // +11
+        + " E8 ?? ?? ?? ??"     // +16
+        ;
+    const sendPhy = Exe.FindHex(sendPat);
+    if (sendPhy < 0)
+        throw Error("AllowMultipleRuneSets: 0x0BD0 native send site not found");
+
+    const writerSingleton = Exe.GetInt32(sendPhy + 2);
+    const writerFnVir     = Exe.GetTgtAddr(sendPhy + 16 + 1);
+
+    $$(_, 6, `writerSingleton=0x${writerSingleton.toString(16)} writerFn=0x${writerFnVir.toString(16)}`);
+
+    //
+    // Assemble the cave
+    //
+    // Helper — 32-bit little-endian hex formatting
+    const u32 = v =>
+          ' ' + ( v        & 0xFF).toString(16).padStart(2, '0')
+        + ' ' + ((v >>>  8) & 0xFF).toString(16).padStart(2, '0')
+        + ' ' + ((v >>> 16) & 0xFF).toString(16).padStart(2, '0')
+        + ' ' + ((v >>> 24) & 0xFF).toString(16).padStart(2, '0');
+
+    const cave =
+          " FF 77 7C"                          // push [edi+0x7c]          (3)
+        + " 8B 8F 90 00 00 00"                 // mov ecx, [edi+0x90]      (6)
+        + " 8B 01"                             // mov eax, [ecx]           (2)
+        + " C7 41 30 00 00 00 00"              // mov [ecx+0x30], 0        (7)
+        + " FF 90 98 00 00 00"                 // call [eax+0x98]          (6)
+        + " 6A FF"                             // push -1                  (2)
+        + " FF 74 24 04"                       // push [esp+4] (saved ptr) (4)
+        + " 68 D0 0B 00 00"                    // push 0x0BD0              (5)
+        + " 8B 0D" + u32(writerSingleton)      // mov ecx, [writerSingleton] (6)
+        + " B8"    + u32(writerFnVir)          // mov eax, writerFn        (5)
+        + " FF D0"                             // call eax                 (2)
+        + " 58"                                // pop eax (discard saved)  (1)
+        + " B8"    + u32(commitVir)            // mov eax, 0x7E61A6        (5)
+        + " FF E0"                             // jmp eax                  (2)
+        ;
+    // 56 bytes total
+    const caveLen = 56;
+    const [cavePhy, caveVir] = Exe.Allocate(caveLen);
+    Exe.SetHex(cavePhy, cave);
+
+    //
+    // Patch the original region: JMP to cave + NOP padding
+    //
+    $$(_, 7, `Patching ${regionLen} bytes @ 0x${resetStartVir.toString(16)} with JMP to cave 0x${caveVir.toString(16)}`);
+
+    const jmpRel = (caveVir - (resetStartVir + 5)) | 0; // rel32 from next instr
+    Exe.SetInt8 (resetStartPhy,     0xE9);
+    Exe.SetInt32(resetStartPhy + 1, jmpRel);
+    for (let i = 5; i < regionLen; i++)
+        Exe.SetInt8(resetStartPhy + i, 0x90);
+
+    return true;
+};

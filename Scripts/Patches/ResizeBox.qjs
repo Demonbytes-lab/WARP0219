@@ -1,0 +1,177 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2024 Shinryo, Ai4rei/AN                                *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Shinryo, Ai4rei/AN                                     *
+*   Created Date  : 2020-11-09                                             *
+*   Last Modified : 2025-06-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+// TODO - Pattern missing for PM Box in 2008 clients. Fix it later if needed.
+
+///
+/// \brief Common function to change the length limit from 70 to
+///        user specified value for the respective box
+///
+ResizeBox = function(_)
+{
+	$$(_, 1.1, `Retrieve the data corresponding to the patchName`)
+	const {varName, arg1, arg2, prefix} = this.Data.get(_);
+
+	$$(_, 1.2, `Find the limit setter (there will be atleast 4 matches)`)
+	let addrs = Exe.FindHexN( MOV([EAX, WCp], 0x46) ); //mov dword ptr [eax + disp8A], 46h (70)
+	let delta = 3;
+
+	if (addrs.isEmpty())
+	{
+		addrs = Exe.FindHexN( MOV([EAX, POS2WC], 0x46) ); //mov dword ptr [eax + dispA], 46h (70)
+		delta = 6;
+	}
+
+	if (addrs.length < 4)
+		throw Error("Not enough MOVes found");
+
+	$$(_, 2, `Get the new box length from user`)
+	const boxLen = Exe.GetUserInput(varName, D_Uint32, prefix + " Box Length", "Enter the new box length in no of chars", 0x46, {min:1, max:255});
+	if (boxLen === false)
+		Cancel("Box Length", 70);
+
+	$$(_, 3, `Find the correct address based on the arguments being PUSHed before it and set the value to boxLen`)
+	const pattern =
+		PUSH(arg1)  //push <arg1>
+	+	PUSH(arg2)  //push <arg2>
+	;
+
+	const found = addrs.some( addr =>
+	{
+		const tgtAddr = Exe.FindHex(pattern, addr - 0x20, addr)	;
+		if (tgtAddr > 0)
+		{
+			Exe.SetFromVar(addr + delta, varName);
+			return true;
+		}
+
+		return false;
+	});
+	if (!found)
+		throw Error("No matches found for Arg PUSHes");
+
+	return true;
+};
+
+///
+/// \brief Disable for unsupported clients
+///
+ResizeBox.validate = IsPost2010;
+
+///
+/// \brief Wrappers over individual patches
+///
+ResizeChatBox     = ResizeBox;
+ResizeChatRoomBox = ResizeBox;
+ResizePMBox       = ResizeBox;
+
+///
+/// \brief Data to be used for the above patches
+///
+ResizeBox.Data = MakeMap(
+	'ResizeChatBox',
+	{
+		varName : '$chatBoxLen',
+		arg1 : 0xF0,
+		arg2 : 0xF0,
+		prefix : 'Chat'
+	},
+
+	'ResizeChatRoomBox',
+	{
+		varName : '$chatRoomBoxLen',
+		arg1 : 0xF2,
+		arg2 : 0xF2,
+		prefix : 'Chat Room'
+	},
+
+	'ResizePMBox',
+	{
+		varName : '$pmBoxLen',
+		arg1 : 0xFF,
+		arg2 : 0x00,
+		prefix : 'PM'
+	}
+);
+
+///
+/// \brief Modify the stack allocation in CGameMode ::Zc_Say_Dialog from 2052 to the user specified value
+///
+ResizeNpcBox = function(_)
+{
+    $$( _, 1.0, `Locate Zc_Say_Dialog using stable signature` );
+
+    const sig =
+        "55 8B EC 81 EC 08 08 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 FC " +
+        "53 8B 5D 08 C7 81 4C 02 00 00 01 00 00 00 56 57 8B 43 04 8D 7B 09";
+
+    const funcAddr = Exe.FindHex(sig);
+    if (funcAddr < 0)
+        throw Error("Zc_Say_Dialog signature not found");
+
+    const subAddr = funcAddr + 3;
+    const stackSub = Exe.GetInt32(subAddr + 2);
+
+    $$( _, 1.2, `Scan forward to find function end ret 4` );
+
+    const endSig = "8B E5 5D C2 04 00";
+
+    const endAddr = Exe.FindHex(endSig, subAddr + 0x40, subAddr + 0x400);
+    if (endAddr < 0)
+        throw Error("Zc_Say_Dialog end not found");
+
+    $$( _, 2.1, `Ask user for new dialog size` );
+
+    const value = Exe.GetUserInput(
+        '$npcBoxLength',
+        D_Int32,
+        "NPC Dialog Size",
+        "Enter new NPC Dialog box length",
+        0x804,
+        { min: 0x804, max: 0x1000 }
+    );
+    if (value === false)
+        Cancel("Size", 2052);
+
+    const newStack = value + stackSub - 0x804;
+
+    Exe.SetInt32(subAddr + 2, newStack);
+
+    $$( _, 3.0, `Patch EBP-based references` );
+
+    for (let i = 0; i <= 3; i++)
+    {
+        const old = (i - stackSub).toHex();
+        const newv = (i - value);
+
+        for (const a of Exe.FindHexN(old, subAddr + 6, endAddr))
+            Exe.SetInt32(a, newv);
+    }
+
+    return true;
+};

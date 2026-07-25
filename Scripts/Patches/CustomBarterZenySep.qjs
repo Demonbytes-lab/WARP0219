@@ -1,0 +1,99 @@
+/**************************************************************************\
+*                                                                          *
+*   Author(s)     : -                                                      *
+*   Created Date  : 2025-06-04                                             *
+*   Last Modified : 2025-06-04                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Intercepts the raw Zeny value in the Barter window and routes it
+///        through the client's native number formatter to display commas.
+///        e.g. "1000000 z" -> "1,000,000 z"
+///
+CustomBarterZenySep = function()
+{
+	const _ = 'CustomBarterZenySep : ';
+
+	$$(_ + '1.1 - Find the native number formatter (sub_A7C670)')
+	const fmtCode =
+		"55 8B EC 83 EC ?? "
+	+	"A1 ?? ?? ?? ?? "
+	+	"33 C5 89 45 FC "
+	+	"56 8B 75 10 "
+	+	"85 F6 74 2D"
+	;
+
+	const fmtPhy = Exe.FindHex(fmtCode);
+	if (fmtPhy < 0)
+		throw Error("Number formatter function not found");
+
+	const fmtFunc = Exe.Phy2Vir(fmtPhy, CODE);
+
+	$$(_ + '1.2 - Find the hook pattern (need 2nd match)')
+	const hookCode =
+		"E8 ?? ?? ?? ?? "
+	+	"8B BD ?? ?? ?? ?? "
+	+	"8D 45 ?? "
+	+	"83 C4 ?? "
+	+	"8B CF "
+	+	"6A 00 6A 00 6A 0C 6A 00 6A 00 "
+	+	"50"
+	;
+
+	const addrs = Exe.FindHexN(2, hookCode);
+	if (addrs.length < 2)
+		throw Error("Hook pattern not found (expected 2 matches)");
+
+	$$(_ + '1.3 - hookAddr, drawFunc, retAddr')
+	const hookAddr = addrs[1];
+
+	const rel      = Exe.GetInt32(hookAddr + 1);
+	const nextVir  = Exe.Phy2Vir(hookAddr + 5, CODE);
+	const drawFunc = nextVir + rel;
+	const retVir   = nextVir;
+
+	$$(_ + '2.1 - Allocate space for string + buffer (separate from code cave)')
+	const [dataPhy, dataVir] = Exe.Allocate(0x20, 0x10);
+	if (dataPhy < 0)
+		throw Error("No free space for data");
+
+	const strVir = dataVir;        // "%s z\0"
+	const bufVir = dataVir + 0x10; // output buffer
+
+	$$(_ + '2.2 - Write format string')
+	Exe.SetHex(dataPhy, "25 73 20 7A 00"); // "%s z\0"
+
+	$$(_ + '3.1 - Build code cave with pre-known addresses')
+	const code =
+		" 60"                                   // pushad
+	+	" 8B 44 24 30"                          // mov eax, [esp+30]  ; raw Zeny
+	+	" 68 04 01 00 00"                       // push 104
+	+	PUSH(bufVir)                            // push bufVir
+	+	" 6A 00"                               // push 0
+	+	" 50"                                  // push eax
+	+	CALL(Filler(1))                         // call fmtFunc
+	+	" 83 C4 10"                             // add esp, 10
+	+	" 61"                                   // popad
+	+	MOV([ESP, 0xC],  strVir)
+	+	MOV([ESP, 0x10], bufVir)
+	+	CALL(Filler(2))
+	+	JMP(Filler(3))
+	;
+
+	$$(_ + '3.2 - AutoHook')
+	AutoHook(hookAddr, code,
+	{
+		targets :
+		{
+			1 : fmtFunc,
+			2 : drawFunc,
+			3 : retVir,
+		},
+	});
+
+	return true;
+}
+
+CustomBarterZenySep.validate = () =>
+	Exe.BuildDate > 20230400;

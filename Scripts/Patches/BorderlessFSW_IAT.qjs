@@ -1,0 +1,402 @@
+/**************************************************************************\
+*                                                                          *
+*   Borderless full-screen — Fixed 2025-Ragexe implementation              *
+*                                                                          *
+*   Discovery: the 2025 Ragexe already has a fully-wired borderless path   *
+*   gated by a single DWORD flag at 0x01602610. When that flag is 1, the   *
+*   game (a) creates its window with WS_POPUP, and (b) calls               *
+*   SetWindowLongA(hwnd, GWL_STYLE, WS_POPUP) + ShowWindow(SW_MAXIMIZE)    *
+*   shortly after, fully converting to borderless. When flag is 0 the     *
+*   game stays in windowed mode. "roext Fix window" toggles this flag.     *
+*                                                                          *
+*   The flag is written ONCE at 0x009EDC9A from a config struct byte       *
+*   (`movzx eax, byte ptr [eax+0xF8]`). The 2025-series client's           *
+*   opensetup does not expose the underlying config bit, so the flag is   *
+*   always 0 at runtime.                                                  *
+*                                                                          *
+*   This patch replaces that single load with a computed value: 1 iff      *
+*   the opensetup-configured resolution (globals 0x122B3D0 / 0x122B3D4)    *
+*   matches the monitor resolution (via GetSystemMetrics), else 0.         *
+*   Result: borderless when user picks matched resolution, windowed       *
+*   otherwise — exactly the requested behavior.                            *
+*                                                                          *
+*   Also calls SetProcessDPIAware() so GetSystemMetrics returns physical   *
+*   pixels even on high-DPI displays.                                      *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Conditionally enable the client's built-in borderless path based on
+///        whether opensetup-configured resolution matches the monitor.
+///
+BorderlessFSW_IAT = function(_)
+{
+	$$(_, 1.1, `Resolve helper imports`)
+	const GetSM  = Exe.FindFunc("GetSystemMetrics",  "USER32.dll");
+	const GetMH  = Exe.FindFunc("GetModuleHandleA",  "KERNEL32.dll");
+	const GetPA  = Exe.FindFunc("GetProcAddress",    "KERNEL32.dll");
+	if (GetSM < 0) throw Error("GetSystemMetrics import missing");
+	if (GetMH < 0) throw Error("GetModuleHandleA import missing");
+	if (GetPA < 0) throw Error("GetProcAddress import missing");
+
+	$$(_, 1.2, `Locate the flag-load site in the config-read function`)
+	//
+	// Target bytes (7 bytes) on 2025-07-16 @ 0x009EDC93:
+	//   0F B6 80 F8 00 00 00         movzx eax, byte ptr [eax+0xF8]
+	// Followed by:
+	//   A3 10 26 60 01               mov dword ptr [0x1602610], eax
+	//
+	// On 2026-02-19 (@ 0x00A40A63) the very same code exists but the config-struct
+	// field moved (0xF8 -> 0x120) and the flag global moved (0x1602610 -> 0x173A8C0).
+	// So neither the displacement nor the flag address may be hardcoded - both are
+	// read out of the two instructions that precede it, which are unchanged:
+	//   8B 87 90 00 00 00            mov eax, [edi+0x90]
+	//   8B 80 84 00 00 00            mov eax, [eax+0x84]
+	// That 4 instruction run matches exactly once on both builds.
+	//
+	// We replace the movzx with a CALL to our stub (5 bytes + 2 NOP pad).
+	// Our stub returns the computed flag value in EAX, which then feeds
+	// straight into the subsequent `mov [<flag>], eax`.
+	//
+	const probe =
+		MOV(EAX, [EDI, 0x90])                //mov eax, dword ptr [edi+0x90]
+	+	MOV(EAX, [EAX, 0x84])                //mov eax, dword ptr [eax+0x84]
+	+	MOVZX(EAX, BYTE_PTR, [EAX, POS2WC])  //movzx eax, byte ptr [eax+<cfgOffset>]
+	+	MOV([POS4WC], EAX)                   //mov dword ptr [<flag>], eax
+	;
+	const probeAddr = Exe.FindHex(probe);
+	if (probeAddr < 0)
+		throw Error("Built-in borderless flag load not found - client layout changed");
+
+	const loadAddr = probeAddr + 12;                  //start of the MOVZX
+	const FLAG_VA  = Exe.GetUint32(loadAddr + 8);     //operand of the A3 that follows it
+
+	$$(_, 2.1, `Allocate strings for runtime SetProcessDPIAware resolution`)
+	const strBlob =
+		"user32.dll\x00" +
+		"SetProcessDPIAware\x00";
+	const strBlobHex = strBlob.split('').map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+	const [strPhy, strVir] = Exe.Allocate(strBlob.length);
+	Exe.SetHex(strPhy, strBlobHex);
+	const userStrVir = strVir;
+	const fnNameStrVir = strVir + 11;
+
+	$$(_, 3.1, `Build the flag-computation stub`)
+	//
+	// Contract:
+	//   (stdcall, 0 args)
+	//   Returns: eax = 1 if opensetup res == monitor res, else 0.
+	//   Preserves: ebx, esi, edi, ebp.
+	//
+	// Trashed regs: eax, ecx, edx. That's safe — at the call site (0x009EDC93)
+	// these are scratch; eax is the output we want. The caller does
+	// `mov [0x1602610], eax` immediately after, so ecx/edx don't matter.
+	//
+	// Algorithm (all values unsigned-safe):
+	//   SetProcessDPIAware()                           ; idempotent
+	//   cx = GetSystemMetrics(0)                       ; SM_CXSCREEN
+	//   if ([0x122B3D0] != cx) return 0
+	//   cy = GetSystemMetrics(1)                       ; SM_CYSCREEN
+	//   if ([0x122B3D4] != cy) return 0
+	//   return 1
+	//
+	// Configured resolution globals (2025-07-16: 0x0122B3D0 / 0x0122B3D4,
+	//                                2026-02-19: 0x01361648 / 0x0136164C).
+	// They are loaded onto the stack right after the CreateWindowExA style decision,
+	// just before the window-creation rectangle math, in an identical 3-instruction run
+	// on both builds:
+	//   A1 <CFG_W>      mov eax, [CFG_W]
+	//   89 45 xx        mov [ebp - x], eax
+	//   A1 <CFG_H>      mov eax, [CFG_H]
+	// so they are read from there rather than hardcoded. The style cmp site itself is
+	// located first since it is what anchors that run.
+	//
+	// The two flag test sites are also derived from FLAG_VA instead of literal bytes.
+	//  Site A: CreateWindowExA Style decision (2025 @0x00DB66ED, 2026 @0x00E581B6).
+	//   Followed by: mov eax, 0x80000000 ; mov ecx, 0x02C20000
+	//  Site B: toggle/secondary path      (2025 @0x005633A7, 2026 @0x0056C3E7).
+	//   Followed by: mov eax, 7          ; mov ecx, 6
+	//
+	const probeStyle =
+		CMP([FLAG_VA], 0)          //cmp dword ptr [<flag>], 0
+	+	MOV(EAX, 0x80000000)       //mov eax, 80000000h
+	+	MOV(ECX, 0x02C20000)       //mov ecx, 02C20000h
+	;
+	const probeToggle =
+		CMP([FLAG_VA], 0)          //cmp dword ptr [<flag>], 0
+	+	MOV(EAX, 7)                //mov eax, 7
+	+	MOV(ECX, 6)                //mov ecx, 6
+	;
+
+	const siteStyle  = Exe.FindHex(probeStyle);
+	const siteToggle = Exe.FindHex(probeToggle);
+	if (siteStyle  < 0) throw Error("CreateWindowExA-style cmp site not found");
+	if (siteToggle < 0) throw Error("Toggle-path cmp site not found");
+
+	const cfgLoad =
+		MOV(EAX, [POS4WC])         //mov eax, dword ptr [CFG_W]
+	+	MOV([EBP, WC], EAX)        //mov dword ptr [ebp - x], eax
+	+	MOV(EAX, [POS4WC])         //mov eax, dword ptr [CFG_H]
+	;
+	const cfgAddr = Exe.FindHex(cfgLoad, siteStyle, siteStyle + 0x40);
+	if (cfgAddr < 0)
+		throw Error("Configured resolution globals not found");
+
+	const CFG_W = Exe.GetUint32(cfgAddr + 1);
+	const CFG_H = Exe.GetUint32(cfgAddr + 9);
+	if (CFG_H !== CFG_W + 4)
+		throw Error("Configured resolution globals are not adjacent - wrong match");
+
+	let code =
+		//--- SetProcessDPIAware (best-effort) -----------------------------
+		PUSH(userStrVir)              //push "user32.dll"
+	+	CALL([GetMH])                 //call [GetModuleHandleA]
+	+	TEST(EAX, EAX)                //test eax, eax
+	+	JZ(Filler(1,1))               //jz _skip_dpi
+	+	PUSH(fnNameStrVir)            //push "SetProcessDPIAware"
+	+	PUSH(EAX)                     //push hModule
+	+	CALL([GetPA])                 //call [GetProcAddress]
+	+	TEST(EAX, EAX)                //test eax, eax
+	+	JZ(Filler(1,1))               //jz _skip_dpi
+	+	CALL(EAX)                     //call eax
+	+	                              //_skip_dpi:
+		//--- Compare width ------------------------------------------------
+		PUSH_0                        //push SM_CXSCREEN
+	+	CALL([GetSM])                 //call [GetSystemMetrics]  ; eax = monitor width
+	+	CMP([CFG_W], EAX)             //cmp [CFG_W], eax
+	+	JNE(Filler(2,1))              //jne _mismatch
+		//--- Compare height -----------------------------------------------
+	+	PUSH_1                        //push SM_CYSCREEN
+	+	CALL([GetSM])                 //call [GetSystemMetrics]  ; eax = monitor height
+	+	CMP([CFG_H], EAX)             //cmp [CFG_H], eax
+	+	JNE(Filler(2,1))              //jne _mismatch
+		//--- Match: return 1 ----------------------------------------------
+	+	MOV(EAX, 1)                   //mov eax, 1
+	+	RETN()                        //retn
+	+	                              //_mismatch:
+		XOR(EAX, EAX)                 //xor eax, eax
+	+	RETN()                        //retn
+	;
+
+	$$(_, 3.2, `Resolve fill-target offsets`)
+	//
+	// _skip_dpi: right after CALL EAX (the DPI block end).
+	// _mismatch: right before XOR EAX, EAX (the final fall-through).
+	//
+	const dpiPrefix =
+		PUSH(userStrVir) + CALL([GetMH]) + TEST(EAX, EAX) + JZ(Filler(1,1))
+	+	PUSH(fnNameStrVir) + PUSH(EAX) + CALL([GetPA]) + TEST(EAX, EAX) + JZ(Filler(1,1))
+	+	CALL(EAX);
+	const skipDpiOffset = dpiPrefix.byteCount();
+
+	// _mismatch is 2 bytes from end (XOR EAX,EAX = 2 bytes, RETN = 1 byte)
+	const totalLen    = code.byteCount();
+	const mismatchOff = totalLen - XOR(EAX, EAX).byteCount() - RETN().byteCount();
+
+	code = SetFillTargets(code, 2, {
+		'1,1' : skipDpiOffset,   // jz targets _skip_dpi
+		'2,1' : mismatchOff      // jne targets _mismatch
+	});
+
+	$$(_, 4.1, `Emit stub`)
+	Exe.BeginTag("BuiltinBorderless_Stub", true);
+	const [free, freeVir] = Exe.Allocate(code.byteCount());
+	Exe.SetHex(free, code);
+
+	$$(_, 5.1, `Replace the config-struct byte read with a call to our stub`)
+	//
+	// Original (7 bytes): 0F B6 80 F8 00 00 00        movzx eax, [eax+0xF8]
+	// Replacement:        E8 <rel32>                  call  stub
+	//                     90 90                       nop nop (pad to 7 bytes)
+	//
+	// The following `mov [<flag>], eax` at loadAddr+7 remains intact
+	// and now stores our computed value instead.
+	//
+	Exe.SetCALL(loadAddr, freeVir, 2);   // E8 + 2 NOPs = 7 bytes total
+
+	$$(_, 5.2, `Hijack the two inline cmp-sites that read the flag directly`)
+	//
+	// The flag is tested in two additional hot paths that do NOT go through
+	// the writer at loadAddr: the CreateWindowExA style decision and a later
+	// toggle path. By the time those cmps execute, the flag may not yet be
+	// populated (writer runs after callers in some paths), so we hijack each
+	// `cmp [flag], 0` directly — calling our stub and using the returned ZF
+	// instead of reading the memory flag.
+	//
+	// Each site is exactly 7 bytes: 83 3D <flag> 00
+	// We replace with:              E8 <rel32>      (call stub, 5B)
+	//                               85 C0            (test eax, eax,  2B)
+	// Total 7 bytes — preserves the following conditional jump/cmov which
+	// consumes ZF exactly as the original cmp did.
+	// (both sites were already located up in step 3.1)
+	//
+	Exe.SetCALL(siteStyle,  freeVir);    // E8 rel32
+	Exe.SetHex (siteStyle  + 5, " 85 C0"); // test eax, eax
+	Exe.SetCALL(siteToggle, freeVir);    // E8 rel32
+	Exe.SetHex (siteToggle + 5, " 85 C0"); // test eax, eax
+
+	$$(_, 6.1, `Force the main window to exact monitor size right after CreateWindowExA`)
+	//
+	// Symptom: after the style-decision patches above, the window enters
+	// WS_POPUP/borderless but its size is the WORK AREA (monitor minus
+	// taskbar) rather than the full monitor. This keeps the taskbar visible
+	// and prevents DWM fullscreen detection from firing.
+	//
+	// Root cause: the client's CreateWindowExA call path ends up producing a
+	// window whose client area is clipped to work area (likely because
+	// ShowWindow(SW_SHOW) on a WS_POPUP|WS_SYSMENU window on Win10/11 sizes
+	// to a system default that isn't quite the full monitor). The exact
+	// clipper doesn't matter: we just force the correct size AFTER
+	// CreateWindowExA but BEFORE the initial ShowWindow, so the first frame
+	// already covers the full monitor and DWM sees a true fullscreen window.
+	//
+	// Hook: the `mov [0x01602AD0], eax` right after the CreateWindowExA call
+	// (stores the returned hwnd into the global). That instruction is 5B
+	// (A3 D0 2A 60 01), exactly the space of a `call rel32`. We redirect it
+	// to a wrapper that:
+	//   (a) preserves the store — the wrapper's first instruction is the
+	//       identical `mov [0x01602AD0], eax`;
+	//   (b) leaves eax intact on return (the caller does `test eax,eax /
+	//       jne showBlock` immediately after to detect CreateWindowExA
+	//       failure);
+	//   (c) when the borderless flag is set, calls SetWindowPos to resize
+	//       the window to the exact monitor dimensions.
+	//
+	const ShowWin   = Exe.FindFunc("ShowWindow",   "USER32.dll");
+	const SetWinPos = Exe.FindFunc("SetWindowPos", "USER32.dll");
+	const UpdWin    = Exe.FindFunc("UpdateWindow", "USER32.dll");
+	if (ShowWin   < 0) throw Error("ShowWindow import missing");
+	if (SetWinPos < 0) throw Error("SetWindowPos import missing");
+	if (UpdWin    < 0) throw Error("UpdateWindow import missing");
+
+	//
+	// The main window handle global (2025-07-16: 0x01602AD0, 2026-02-19: 0x0173AD68)
+	// is identified by the one place that PUSHes it straight into UpdateWindow, right
+	// after the window is shown. That matches exactly once on both builds, whereas the
+	// old anchor (the literal indirect CreateWindowExA call) does not survive - on 2026
+	// that call has already been redirected into a cave by CustomWinTitle.
+	//
+	const hwndRef = Exe.FindHex( PUSH([POS4WC]) + CALL([UpdWin]) );
+	if (hwndRef < 0)
+		throw Error("main window handle global not found");
+
+	const HWND_VA = Exe.GetUint32(hwndRef + 2);
+
+	//
+	// Resize wrapper contract:
+	//   Entry:  eax = hwnd returned by CreateWindowExA (may be NULL).
+	//   Exit:   eax preserved (= hwnd). Side effects: [HWND_VA]=eax, and if
+	//           borderless-flag is live-true and hwnd!=NULL, window is resized
+	//           to (0,0)-(GSM(0),GSM(1)).
+	//
+	// Note: we call the flag-compute stub (freeVir) rather than read the
+	// global at [FLAG_VA], because the global is written at config-load time
+	// which may or may not have executed before CreateWindowExA. The stub
+	// recomputes from opensetup globals + GetSystemMetrics on every call,
+	// so the result is correct regardless of ordering.
+	//
+	//
+	// Emit the CALL to flag-stub as a raw 5-byte placeholder (E8 + rel32=0);
+	// we patch the rel32 via Exe.SetCALL once resizeVir is known.
+	//
+	const CALL_PLACEHOLDER = " E8 00 00 00 00";
+
+	let resizeCode =
+		// Preserve original `mov [HWND_VA], eax`.
+		MOV([HWND_VA], EAX)          // A3 D0 2A 60 01
+	+	TEST(EAX, EAX)                // test eax, eax
+	+	JZ(Filler(1,1))               // jz  _ret  (NULL hwnd — skip all)
+	+	PUSH(EBX)                     // push ebx
+	+	MOV(EBX, EAX)                 // mov ebx, eax           ; ebx = hwnd
+	+	CALL_PLACEHOLDER              // call flag-stub (rel32 patched below)
+	+	TEST(EAX, EAX)                // test eax, eax
+	+	JZ(Filler(2,1))               // jz  _restore           ; flag=0 → no resize
+	+	PUSH(0x34)                    // push SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED
+	+	PUSH(1)                       // push SM_CYSCREEN
+	+	CALL([GetSM])                 // call [GetSystemMetrics]
+	+	PUSH(EAX)                     // push cy
+	+	PUSH(0)                       // push SM_CXSCREEN
+	+	CALL([GetSM])                 // call [GetSystemMetrics]
+	+	PUSH(EAX)                     // push cx
+	+	PUSH(0)                       // push 0           ; Y
+	+	PUSH(0)                       // push 0           ; X
+	+	PUSH(0)                       // push NULL        ; hWndInsertAfter (HWND_TOP)
+	+	PUSH(EBX)                     // push hwnd
+	+	CALL([SetWinPos])             // call [SetWindowPos]
+	+	                              // _restore:
+		MOV(EAX, EBX)                 // mov eax, ebx     ; restore eax = hwnd
+	+	POP(EBX)                      // pop ebx
+	+	                              // _ret:
+		RETN()                        // ret
+	;
+
+	// Resolve in-buffer jump targets.
+	const resizeTotal = resizeCode.byteCount();
+	const retOff      = resizeTotal - RETN().byteCount();
+	const restoreOff  = retOff - POP(EBX).byteCount() - MOV(EAX, EBX).byteCount();
+	resizeCode        = SetFillTargets(resizeCode, 2, {
+		'1,1' : retOff,        // jz (NULL hwnd) -> _ret
+		'2,1' : restoreOff     // jz (flag=0)    -> _restore
+	});
+
+	Exe.BeginTag("BuiltinBorderless_Resize", true);
+	const [resizePhy, resizeVir] = Exe.Allocate(resizeCode.byteCount());
+	Exe.SetHex(resizePhy, resizeCode);
+
+	// Patch the CALL rel32 to point at the flag-stub (freeVir). The CALL
+	// sits at offset = MOV+TEST+JZ+PUSH+MOV inside the buffer.
+	const callOffset =
+		MOV([HWND_VA], EAX).byteCount()
+	+	TEST(EAX, EAX).byteCount()
+	+	JZ(Filler(1,1)).byteCount()
+	+	PUSH(EBX).byteCount()
+	+	MOV(EBX, EAX).byteCount();
+	const callSiteVir = resizeVir + callOffset;     // VA of the E8 byte
+	const rel32       = (freeVir - (callSiteVir + 5)) & 0xFFFFFFFF;
+	// Overwrite the 4-byte rel32 (skip the E8 opcode byte itself).
+	Exe.SetHex(resizePhy + callOffset + 1, rel32.toHex(4));
+
+	$$(_, 6.2, `Redirect the post-CreateWindowExA hwnd store to the resize wrapper`)
+	//
+	// The store is 5 bytes (A3 <HWND_VA>). Replace with `call resizeVir`
+	// (E8 + rel32 = 5 bytes exact). The wrapper performs the store itself
+	// as its first instruction.
+	//
+	// It used to be anchored on the preceding `FF 15 <CreateWindowExA IAT>` to
+	// disambiguate. That anchor is not portable: on 2026-02-19 the client's own
+	// CustomWinTitle hook has already turned that indirect call into `E8 <cave> 90`,
+	// so the 6 byte prefix is gone. The store itself is unique though - `A3 <HWND_VA>`
+	// occurs exactly once on both 2025-07-16 and 2026-02-19 - so anchor on that and
+	// only fall back to it if the old (more specific) probe misses.
+	//
+	const probeStore =
+		" FF 15 7C 16 FC 00"         // call [CreateWindowExA IAT]  (pre-WinMaker)
+	+	" A3 D0 2A 60 01"            // mov [0x01602AD0], eax
+	+	" 5F 5E 5B"                  // pop edi ; pop esi ; pop ebx
+	+	" 85 C0"                     // test eax, eax
+	;
+
+	let storeSite;
+	const probeHit = Exe.FindHex(probeStore);
+	if (probeHit >= 0)
+	{
+		storeSite = probeHit + 6;   // skip the 6B indirect call
+	}
+	else
+	{
+		const stores = Exe.FindHexN( MOV([HWND_VA], EAX) );  //mov dword ptr [<hwnd>], eax
+		if (stores.length !== 1)
+			throw Error("post-CreateWindowExA hwnd store not found");
+
+		storeSite = stores[0];
+	}
+
+	Exe.SetCALL(storeSite, resizeVir);   // E8 rel32 = 5 bytes exact
+
+	return true;
+};
+
+///
+/// \brief Only valid on modern clients.
+///
+BorderlessFSW_IAT.validate = IsPost2010;

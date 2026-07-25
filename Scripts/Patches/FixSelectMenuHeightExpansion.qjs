@@ -1,0 +1,26 @@
+FixSelectMenuHeightExpansion = function()
+{
+	const _ = 'FixSelectMenuHeightExpansion : ';
+
+	$$(_ + '1.1 - Find the pattern')
+	const code =
+		"7F 08 "                 // jg short ...
+	+	"85 C0 "                 // test eax,eax  <- cmp eax,eax
+	+	"0F 8E ?? ?? ?? ?? "     // jle ...
+	+	"8B 86 ?? ?? ?? ?? "     // mov eax, [esi+??]
+	+	"8B 56 ?? "              // mov edx, [esi+??]
+	+	"8B FA"                  // mov edi, edx
+	;
+
+	const addr = Exe.FindHex(code);
+	if (addr < 0)
+		throw Error("Pattern not found");
+
+	$$(_ + '1.2 - Change test eax,eax (85 C0) to cmp eax,eax (39 C0)')
+	Exe.SetUint8(addr + 2, 0x39);
+
+	return true;
+};
+
+FixSelectMenuHeightExpansion.validate = () =>
+	Exe.BuildDate > 20240120;

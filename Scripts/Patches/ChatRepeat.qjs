@@ -1,0 +1,80 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2013-2024 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Neo-Mind                                               *
+*   Created Date  : 2020-11-06                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Modifies comparison in the ::IsSameSentence function
+///
+///        UnlimitedChatRepeat - Enforces a JMP
+///        LimitedChatRepeat - Changes the limit itself
+///
+ChatRepeat = function(_)
+{
+
+  //The comparison is followed by the UIWindowMgr::MakeWindow argument PUSHes.
+  //2025-07-16 pushes 4 zeroes before 'push 3'; the 2026-02-19 client (BuildDate 20260211)
+  //gained one extra parameter on that call, so it pushes 5 zeroes instead
+  //(verified at 0x00CF0B45 : cmp [ebp+8],2 / jl / 6A 00 x5 / 6A 03 / mov ecx,<g_windowMgr> / call).
+  //Try the older shape first so pre-2026 clients keep matching exactly as before.
+  const pats =
+  [
+    "83 7D 08 02 7C ?? 6A 00 6A 00 6A 00 6A 00 6A 03",       //<= 2025 (4 zeroes)
+    "83 7D 08 02 7C ?? 6A 00 6A 00 6A 00 6A 00 6A 00 6A 03"  //2026+   (5 zeroes)
+  ];
+
+  let base = -1;
+  for (const pat of pats)
+  {
+    base = Exe.FindHex(pat);
+    if (base > 0)
+      break;
+  }
+  if (base < 0)
+    throw Error("ChatRepeat pattern not found");
+
+  const CMP_IMM_OFF = 3; // 83 7D 08 **02**
+  const JL_OP_OFF   = 4; // **7C** ??
+
+  if (_ === "UnlimitedChatRepeat") {
+    // JL(7C) �� JMP(EB)
+    Exe.SetHex(base + JL_OP_OFF, "EB");
+  } else {
+    const varName = "$chatFloodLimit";
+    const limit = Exe.GetUserInput(
+      varName, D_Uint8, "Chat Limit", "Enter the new limit", 2, { max:127 }
+    );
+    if (limit === false) Cancel("Chat Limit", 2);
+
+    // �� �� 2�ڸ� HEX ���ڿ��� ��ȯ �� ���
+    const hx = limit.toString(16).toUpperCase().padStart(2, "0");
+    Exe.SetHex(base + CMP_IMM_OFF, hx);
+  }
+  return true;
+};
+
+UnlimitedChatRepeat = ChatRepeat;
+LimitedChatRepeat   = ChatRepeat;

@@ -1,0 +1,226 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 CrazyBebop                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : CrazyBebop, Shinryo                                    *
+*   Created Date  : 2026-03-19                                             *
+*   Last Modified : 2026-03-19                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Enable Official Custom Fonts (Reforged)
+///
+///   Microsoft's T2Embed API (TTLoadEmbeddedFont) is broken on modern Windows —
+///   returns E_T2NOFREEMEMORY (0x200) for all .eot files due to removed MTX
+///   decompression support. This rewrite bypasses T2Embed entirely:
+///
+///   1. Copies pre-converted .ttf fonts to the client's System/Font/ folder
+///   2. Hooks InitGameSubsystems to load .ttf fonts via AddFontResourceExA
+///   3. Patches face name strings to strip ".eot" suffix (CreateFontIndirectA match)
+///   4. Fixes NHCgogo name mismatch (EOT header says "Rix*", TTF says "NHCgogo_10")
+///
+///   Requires: FixFontsCharset (auto-enabled via needs)
+///
+EnableCustomFonts = function(_)
+{
+	$$(_, 1, `Ask user about font file management`)
+	if (!Warp.TestMode)
+	{
+		const clientDir = Exe.GetUserInput('$fontClientDir', D_Text,
+			"Client Folder",
+			"Enter your Ragnarok Online client folder path<br>(the folder containing your .exe and <b>System\\Font</b>)",
+			"",
+			{minLen: 3, maxLen: 512}
+		);
+
+		let doCopy = false;
+		let doDelete = false;
+
+		if (clientDir !== false && clientDir.length > 0)
+		{
+			doCopy = Exe.GetUserInput('$fontCopyTtf', D_Bool,
+				"Copy Font Files",
+				"<b>Custom Fonts (Reforged)</b> requires .ttf font files in your client's <b>System\\Font</b> folder.<br><br>"
+				+ "Copy the included .ttf fonts to:<br><b>" + clientDir + "/System/Font</b> ?",
+				true
+			);
+
+			if (doCopy)
+			{
+				doDelete = Exe.GetUserInput('$fontDeleteEot', D_Bool,
+					"Delete .eot Files",
+					"Do you want to delete the old .eot files?<br><br>"
+					+ "They are no longer needed on modern Windows.",
+					false
+				);
+			}
+
+			/// Now perform file operations
+			if (doCopy)
+			{
+				const fontDir = clientDir + "/System/Font";
+				System.MkDir(clientDir + "/System");
+				System.MkDir(fontDir);
+
+				const ttfFiles = [
+					"RixSquirrel_10.ttf", "RixSquirrel_12.ttf",
+					"RixLoveangel_10.ttf", "RixLoveangel_12.ttf",
+					"RixDiary_10.ttf", "RixMiniHeart_10.ttf",
+					"RixFreshman_10.ttf", "RixMagic_10.ttf",
+					"RixKid_10.ttf", "RixJJangu_10.ttf",
+					"RixNHCgogo_10.ttf", "NHCgogo_10.ttf", "NHCgogo_12.ttf",
+				];
+
+				for (const f of ttfFiles)
+					System.Copy("Inputs/Fonts/" + f, fontDir);
+
+				if (doDelete)
+				{
+					const eotNames = [
+						"RixSquirrel_10.eot", "RixSquirrel_12.eot",
+						"RixLoveangel_10.eot", "RixLoveangel_12.eot",
+						"RixDiary_10.eot", "RixMiniHeart_10.eot",
+						"RixFreshman_10.eot", "RixMagic_10.eot",
+						"RixKid_10.eot", "RixJJangu_10.eot",
+						"RixNHCgogo_10.eot", "NHCgogo_10.eot", "NHCgogo_12.eot",
+					];
+
+					for (const f of eotNames)
+						System.Delete(fontDir + "/" + f);
+				}
+			}
+		}
+	}
+
+	$$(_, 2, `Find the Langtype comparison (for locating InitGameSubsystems epilogue)`)
+	let code =
+		JNE(0xAE)
+	+   CALL(ALLWC)
+	+	PUSH(POS4WC)
+	;
+
+	let addr = Exe.FindHex(code);
+	if (addr < 0)
+	{
+		code = JNE(0xAE) + CALL(ALLWC) + PUSH(POS3WC);
+		addr = Exe.FindHex(code);
+	}
+	if (addr < 0)
+		throw Error("Langtype comparison not found");
+
+	/// Get epilogue location from JNE target. Don't NOP — T2Embed block stays skipped.
+	const jneTargetPhy = addr + 6 + Exe.GetInt32(addr + 2);
+
+	$$(_, 3, `Find AddFontResourceExA import`)
+	const addFontAddr = Exe.FindFunc("AddFontResourceExA", "GDI32.dll");
+	if (addFontAddr < 0)
+		throw Error("AddFontResourceExA not found");
+
+	$$(_, 4, `Find the init hook point`)
+	const epilogueHex = " 8B 4D F4 64 89 0D 00 00 00 00";
+	const hookAddr = Exe.FindHex(epilogueHex, jneTargetPhy, jneTargetPhy + 0x20);
+	if (hookAddr < 0)
+		throw Error("InitGameSubsystems epilogue not found");
+
+	$$(_, 5, `Add .ttf font path strings and build loader`)
+	const fonts = [
+		"System\\Font\\RixSquirrel_10.ttf",
+		"System\\Font\\RixSquirrel_12.ttf",
+		"System\\Font\\RixLoveangel_10.ttf",
+		"System\\Font\\RixLoveangel_12.ttf",
+		"System\\Font\\RixDiary_10.ttf",
+		"System\\Font\\RixMiniHeart_10.ttf",
+		"System\\Font\\RixFreshman_10.ttf",
+		"System\\Font\\RixMagic_10.ttf",
+		"System\\Font\\RixKid_10.ttf",
+		"System\\Font\\RixJJangu_10.ttf",
+		"System\\Font\\RixNHCgogo_10.ttf",
+		"System\\Font\\NHCgogo_10.ttf",
+		"System\\Font\\NHCgogo_12.ttf",
+	];
+
+	let initCode = PUSHAD;
+	for (const font of fonts)
+	{
+		const [, strAddr] = Exe.AddText(font);
+		initCode +=
+			PUSH(0)
+		+	PUSH(0x10)
+		+	PUSH(strAddr)
+		+	CALL([addFontAddr])
+		;
+	}
+	initCode +=
+		POPAD
+	+	" 8B 4D F4"
+	+	" 64 89 0D 00 00 00 00"
+	+	JMP(Filler(1))
+	;
+
+	$$(_, 6, `Install init hook`)
+	AutoHook(hookAddr, initCode, {
+		targets : { 1 : Exe.Phy2Vir(hookAddr + 10, CODE) },
+		nops    : 10 - 5
+	});
+
+	$$(_, 7, `Strip .eot from font face name strings`)
+	const faceNames = [
+		"RixSquirrel_10",
+		"RixSquirrel_12",
+		"RixLoveangel_10",
+		"RixLoveangel_12",
+		"RixNHCgogo_10",
+		"RixDiary_10",
+		"RixMiniHeart_10",
+		"RixFreshman_10",
+		"RixKid_10",
+		"RixMagic_10",
+		"RixJJangu_10",
+	];
+
+	for (const name of faceNames)
+	{
+		const sAddr = Exe.FindText(name + ".eot", PHYSICAL, false);
+		if (sAddr < 0)
+			continue;
+
+		if (name === "RixNHCgogo_10")
+		{
+			/// TTF registers as "NHCgogo_10" (no Rix prefix), overwrite entirely
+			Exe.SetHex(sAddr,
+				" 4E 48 43 67 6F 67 6F 5F 31 30 00 00 00 00 00 00 00 00 00"
+			);
+		}
+		else
+		{
+			Exe.SetInt8(sAddr + name.length, 0x00);
+		}
+	}
+
+	return true;
+}
+
+///
+/// \brief Disable for really old clients
+///
+EnableCustomFonts.validate = () =>
+	Exe.BuildDate > 20080103;

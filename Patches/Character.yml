@@ -1,0 +1,233 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) ?-2023 *Various authors*                                 #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind, CrazyBebop                                   #
+#   Created Date  : 2020-08-26                                             #
+#   Last Modified : 2026-03-29                                             #
+#                                                                          #
+############################################################################
+
+            
+CustomChar:
+    title : CHARACTER CUSTOMIZATION
+    mutex : false
+    color : darkorchid
+    
+    patches:
+        - OfficialPal:
+            title : Use official cloth palettes
+            recommend : no
+            author : Neo-Mind
+            desc : Forces the client to use Gravity's official cloth color palettes on all langtypes. <b>WARNING:</b> Incompatible with the 'Enable Custom Jobs' patch.
+        
+        - NoGMSprite:
+            title : Disable GM sprite
+            recommend : no
+            author : Neo-Mind
+            desc : Hides the special GM sprite (the yellow character) while keeping all GM functionality intact, including the yellow name color and admin right-click menu. GMs appear as their normal job class.
+        
+        - ShowBGEmblem:
+            title : Enable Emblem hover for BG [Experimental]
+            recommend : no
+            author : Neo-Mind
+            desc : Displays guild emblems above characters in Battleground maps, the same way they appear during Guild vs Guild (WoE). Helps identify team members in BG. Experimental -- may have visual quirks.
+        
+        - RestoreModelCulling:
+            title : Restore model culling
+            recommend: no
+            author : Curiosity , Neo-Mind
+            desc : Makes 3D models (buildings, walls, objects) that block your view of the player character turn transparent. Improves visibility in areas with large obstructing models.
+        
+        - Intravision:
+            title : Always see hidden/cloaked objects
+            recommend : no
+            author : Secret, A.K.M. , Neo-Mind
+            desc : Makes hidden and cloaked characters/objects always visible as dark silhouettes, as if the player permanently has the Intravision buff. Useful for GMs or testing -- gives an unfair advantage in PvP.
+        
+        - CustomQSDelay:
+            title : Customize Quick Switch delay
+            recommend : no
+            author : mrjnumber1
+            desc : Changes the cooldown delay (in ticks) for the quick equipment swap feature. Lower values allow faster gear switching; higher values enforce a longer wait between swaps.
+        
+        - AllowPL2Leave:
+            title : Allow party leader to leave
+            recommend : no
+            author : Andrei Karas (4144) , Neo-Mind
+            desc : Allows the party leader to leave the party when no other members are on the same map. By default, the client prevents the leader from leaving while the party still exists.
+        
+        - AllowSkillSpam:
+            title : Allow spam skills by hotkey
+            recommend : no
+            author : Neo-Mind, Functor , Andrei Karas (4144) , CrazyBebop , Victor Hugo
+            desc : Allows rapid skill casting by holding down a hotkey instead of having to press it repeatedly. Removes the client-side cooldown between hotkey activations.
+        
+        - AllowGuildInClan:
+            title : Allow guild activities in clan
+            recommend : no
+            author : Functor, Secret , Neo-Mind
+            desc : Removes the client-side restriction that blocks guild features (creating/joining guilds, GvG, etc.) while the player is a member of a clan. Allows both memberships to coexist.
+        
+        - CustomAFStopDelay:
+            title : Customize auto follow stop delay
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Changes the delay before auto-follow stops after the target moves out of range. Lower values make the character stop sooner; higher values keep following longer.
+        
+        - ShowGvGDamage:
+            title : Show Damage for GvG
+            recommend : no
+            author : Andrei Karas (4144) , X-EcutiOnner
+            desc : Shows damage numbers on Guild vs Guild (WoE) maps. By default, the client hides all damage digits during GvG to reduce visual clutter, but this makes it hard to gauge effectiveness.
+
+        - Allow65kHairs:
+            title     : Allow 65k Hair Styles
+            recommend : no
+            author    : Ai4rei/AN, Neo-Mind, CrazyBebop
+            desc      : Removes the hard-coded hair style limit, allowing the client to load any hair sprite by number. Supports up to 65535 styles.
+
+CustomAutoFollow:
+    title : AUTO FOLLOW CUSTOMIZATION
+    mutex : true
+    
+    patches:
+        - NoAutoFollow:
+            title : Disable auto follow
+            recommend : no
+            author : Functor , Neo-Mind
+            desc : Completely disables the Shift+Right-Click auto-follow feature. Use on servers where auto-follow is considered an exploit or is not desired.
+        
+        - DecrAFDelay:
+            title : Decrease auto follow delay
+            recommend : no
+            author : CH.C (jchcc)
+            desc : Reduces the initial delay before auto-follow starts moving after Shift+Right-Click. Lower values make the character begin following sooner.
+
+CustomAura:
+    title : AURA CUSTOMIZATION
+    mutex : false
+    
+    patches:
+        - CustomAuraSprites:
+            title : Customize Aura sprites
+            recommend : no
+            author : Shinryo
+            desc : Separates aura sprites from warp portal effects by using dedicated files (aurafloat.tga and auraring.bmp in 'data\\texture\\effect'). Prevents high-level character auras from visually interfering with warp portals.
+        
+        - CustomAuraLimits:
+            title : Customize Aura display limits
+            recommend : no
+            author : Neo-Mind
+            desc : Customizes which character classes and levels display the standard aura effect. Set minimum levels and allowed job classes for aura visibility to match your server's progression system.
+
+CustomChatColor:
+    title : <font color="#9F00EF">CHA</font><font color="#5F00FF">T CO</font><font color="blue">LOR </font><font color="green">CUS</font><font color="yellow">TOM</font><font color="orange">IZA</font><font color="red">TION</font>
+    mutex : false
+    
+    patches:
+        - CustomGMColor:
+            title : Customize chat color (GM)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of GM chat messages to a custom hex value. Default is ffff00 (yellow). Use to make GM announcements stand out in your preferred color.
+    
+        - CustomGuildColor:
+            title : Customize chat color (Guild)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of guild chat messages to a custom hex value. Default is b4ffb4 (light green).
+        
+        - CustomPartyColor:
+            title : Customize chat color (Party - Others)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of party chat messages from other members to a custom hex value. Default is ffc8c8 (pinkish).
+        
+        - CustomPartyColorSelf:
+            title : Customize chat color (Party - Self)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of your own party chat messages to a custom hex value. Default is ffc800 (orange).
+        
+        - CustomPublicColor:
+            title : Customize chat color (Public - Others)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of public chat messages from other players to a custom hex value. Default is ffffff (white).
+        
+        - CustomPublicColorSelf:
+            title : Customize chat color (Public - Self)
+            recommend : no
+            author : Ai4rei/AN , Shakto
+            desc : Changes the color of your own public chat messages to a custom hex value. Default is 00ff00 (green).
+
+SkipCheatCheck:
+    title : SKIP CHEATER CHECK
+    mutex : false
+    
+    patches:
+        - SkipInFriendList:
+            title : Skip Friend list cheat check
+            recommend : no
+            author : Ai4rei/AN
+            desc : Disables the "possible impersonation" warning when receiving a PM from someone whose name resembles a friend on your list. The warning is meant to detect name spoofing but causes false positives.
+        
+        - SkipInGuildList:
+            title : Skip Guild Member cheat check
+            recommend : no
+            author : Ai4rei/AN
+            desc : Disables the "possible impersonation" warning when receiving a PM from someone whose name resembles a guild member. Same as the friend list version but for guild members.
+
+WalkDelay:
+    title : WALK DELAY
+    mutex : true
+    
+    patches:
+        - NoWalkDelay:
+            title : Remove Walk Delay
+            recommend : no
+            author : MegaByte , X-EcutiOnner
+            desc : Removes the delay between walk-click inputs entirely, allowing immediate movement response. <b>Note:</b> May cause the client to send duplicate movement packets to the server.
+        
+        - CustomWalkDelay:
+            title : Customize Walk Delay
+            recommend : no
+            author : MegaByte , X-EcutiOnner
+            desc : Changes the delay between walk-click inputs to a custom value (in milliseconds). Lower values make movement more responsive. <b>Note:</b> Very low values may cause the client to send duplicate movement packets.
+
+ResButtonVis:
+    title : RESURRECT BUTTON VISIBILITY
+    mutex : true
+    color : darkorange
+    
+    patches:
+        - HideResButton:
+            title : Skip Resurrection button
+            recommend : no
+            author : Shinryo
+            desc : Hides the Token of Ziegfried resurrection button when the player dies, even if one is in inventory. Use on servers where self-resurrection is not desired or the token has been repurposed.
+        
+        - ShowResButton:
+            title : Always show Resurrection button
+            recommend : no
+            author : Neo-Mind
+            desc : Always shows the Token of Ziegfried resurrection button on death regardless of the map type. By default, the button is hidden on certain map types like PvP or GvG maps.

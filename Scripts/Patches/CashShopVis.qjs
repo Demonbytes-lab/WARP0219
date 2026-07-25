@@ -1,0 +1,56 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2014-2024 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Neo-Mind                                               *
+*   Created Date  : 2020-11-08                                             *
+*   Last Modified : 2024-08-08                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Find the reference UIWindow creation code and use it to
+///        HideCashShop - NOP out the code for Cash Shop Icon creation (ID = 0xBE) if present before it.
+///        ShowCashShop - Inject code for Cash Shop Icon creation (ID = 0xBE) before it if not present.
+///
+HideCashShop = function(_)
+{
+	$$(_, 1.1, `Locate CashShop creation point (push 0xBE / call UIWindowMgr::MakeWindow)`);
+
+	const pattern =
+		"68 BE 00 00 00 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00";
+
+	const addr = Exe.FindHex(pattern);
+	if (addr < 0)
+		throw Error("CashShop creation pattern not found");
+
+	$$(_, 2.1, `Disable CashShop icon creation by NOPing the call`);
+	// Jump over MakeWindow and NOP the rest
+	Exe.SetHex(addr, "EB 0D 90 90 90 90 90 90 90 90 90 90 90 90 90");
+
+	$$(_, 2.2, `CashShop icon creation disabled successfully.`);
+	return true;
+};
+
+///
+/// Validate only if client has cash shop feature
+///
+HideCashShop.validate = HasCashShop;

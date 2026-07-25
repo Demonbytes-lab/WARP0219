@@ -1,0 +1,87 @@
+/**************************************************************************\
+*   HideProbabilityUI – hides the Help button in basic interface
+\**************************************************************************/
+
+function FindLastText(str)
+{
+    let pos = Exe.FindText(str);
+    let last = pos;
+
+    while (pos >= 0)
+    {
+        pos = Exe.FindText(str, last + 1);
+        if (pos >= 0)
+            last = pos;
+    }
+    return last;
+}
+
+function FindLastPush(addr)
+{
+    const pattern = PUSH(addr);
+    let pos = Exe.FindHex(pattern);
+    let last = pos;
+
+    while (pos >= 0)
+    {
+        pos = Exe.FindHex(pattern, last + 1);
+        if (pos >= 0)
+            last = pos;
+    }
+    return last;
+}
+
+HideProbabilityUI = function ()
+{
+    const _ = "HideProbabilityUI : ";
+
+    if (Exe.BuildDate < 20240700)
+    {
+        $$(_ + "Legacy build detected — skipping");
+        return true;
+    }
+
+    $$(_ + "Applying Help button VA patch…");
+
+    const helpNormal = FindLastText("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_help_normal.bmp");
+    const helpOver = FindLastText("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_help_over.bmp");
+    const helpPressed = FindLastText("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_help_pressed.bmp");
+    const helpDisabled = FindLastText("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_help_disabled.bmp");
+
+    if (helpNormal < 0 || helpOver < 0 || helpPressed < 0 || helpDisabled < 0)
+        throw Error("btn_help_*.bmp not found");
+
+    const newNormal   = helpNormal   + 0x32;
+    const newOver     = helpOver     + 0x30;
+    const newPressed  = helpPressed  + 0x33;
+    const newDisabled = helpDisabled + 0x34;
+
+    const pNormal   = FindLastPush(helpNormal);
+    const pOver     = FindLastPush(helpOver);
+    const pPressed  = FindLastPush(helpPressed);
+    const pDisabled = FindLastPush(helpDisabled);
+
+    if (pNormal < 0 || pOver < 0 || pPressed < 0 || pDisabled < 0)
+        throw Error("Help button push targets not found");
+
+    Exe.SetUint32(pNormal   + 1, newNormal);
+    Exe.SetUint32(pOver     + 1, newOver);
+    Exe.SetUint32(pPressed  + 1, newPressed);
+    Exe.SetUint32(pDisabled + 1, newDisabled);
+
+    const s1 = Exe.FindHex("6A 01", pNormal - 0x40, pOver + 0x40);
+    const s2 = Exe.FindHex("6A 02", pOver - 0x40, pPressed + 0x40);
+    const s3 = Exe.FindHex("6A 03", pPressed - 0x40, pDisabled + 0x40);
+
+    if (s1 >= 0) Exe.SetUint8(s1 + 1, 0x00);
+    if (s2 >= 0) Exe.SetUint8(s2 + 1, 0x00);
+    if (s3 >= 0) Exe.SetUint8(s3 + 1, 0x00);
+
+    $$(_ + "Help button patch completed.");
+    return true;
+};
+
+HideProbabilityUI.validate = function ()
+{
+    return (Exe.BuildDate >= 20240600);
+};

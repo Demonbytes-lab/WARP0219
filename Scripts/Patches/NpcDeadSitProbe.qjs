@@ -1,0 +1,70 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 DemonBytes (NoxaraRO)                               *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Purpose : P1 empirical probe for the UNPC_DEADSIT investigation.       *
+*             Forces [actor+0x304] = PROBE_N on every 0x9FF idle_unit AND  *
+*             0x9FE spawn_unit so we can observe what (if any) value of    *
+*             +0x304 drives a visible sit/dead/frozen/aura state on-screen.*
+*                                                                          *
+*   Site    : Inside inner handlers 0x00CF6390 (idle_unit) and 0x00CF4030  *
+*             (spawn_unit), both at the `ja +0x16 / mov [edi+0x304],al`    *
+*             sequence that conditionally writes the isBoss byte.          *
+*                                                                          *
+*   Original 8 bytes (ja skip; mov [edi+0x304], al):                       *
+*       77 16  88 87 04 03 00 00                                           *
+*   Patched  8 bytes (mov byte [edi+0x304], NN; nop):                      *
+*       C6 87 04 03 00 00  NN  90                                          *
+*                                                                          *
+*   => Guard is removed, isBoss source is ignored, AL is preserved for any *
+*      downstream use, [+0x304] is forced to NN unconditionally.           *
+*                                                                          *
+*   HOW TO USE:                                                            *
+*     1. Set PROBE_N below to the test value (1..15 typically).            *
+*     2. Rebuild: ./win32/WARP_console.exe -using profiles/noxararo_shield *
+*     3. Launch client and observe all actors. Vary PROBE_N, repeat.       *
+*                                                                          *
+\**************************************************************************/
+
+NpcDeadSitProbe = function(_)
+{
+	// Probe value written into every actor's [+0x304]. Change and rebuild.
+	const PROBE_N = 0xFF;
+
+	$$(_, 1.1, `Locate isBoss-gate: test al,al ; je skip ; cmp [+0x304],0`)
+	// 84 C0                  test al, al        ; al = isBoss from [ebp+0x88]
+	// 74 24                  je  +0x24          ; *** skips the write if isBoss==0 ***
+	// 80 BF 04 03 00 00 00   cmp byte [edi+0x304], 0
+	const gatePat = "84 C0 74 24 80 BF 04 03 00 00 00";
+	const gates = Exe.FindHexN(gatePat);
+	if (!gates || gates.length === 0)
+		throw Error("NpcDeadSitProbe: isBoss gate not found");
+
+	$$(_, 1.2, `Locate guard+write pair: ja skip ; mov [+0x304],al`)
+	const writePat = "77 16 88 87 04 03 00 00";
+	const writes = Exe.FindHexN(writePat);
+	if (!writes || writes.length === 0)
+		throw Error("NpcDeadSitProbe: guard+write pair not found");
+	if (writes.length !== gates.length)
+		throw Error("NpcDeadSitProbe: gate/write count mismatch (" + gates.length + " vs " + writes.length + ")");
+
+	$$(_, 1.3, `NOP the je gate (2 bytes: 74 24 -> 90 90)`)
+	for (const phy of gates)
+		Exe.SetHex(phy + 2, "90 90");
+
+	$$(_, 1.4, `Replace write: mov byte [edi+0x304], PROBE_N ; nop`)
+	const nn = (PROBE_N & 0xff).toString(16).padStart(2, '0').toUpperCase();
+	const repl = "C6 87 04 03 00 00 " + nn + " 90";
+	for (const phy of writes)
+		Exe.SetHex(phy, repl);
+
+	return true;
+};
+
+NpcDeadSitProbe.validate = () =>
+	Exe.BuildDate >= 20250000 &&
+	Exe.FindHex("77 16 88 87 04 03 00 00") > 0;

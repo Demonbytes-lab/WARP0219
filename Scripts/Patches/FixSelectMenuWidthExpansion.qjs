@@ -1,0 +1,163 @@
+FixSelectMenuWidthExpansion = function(_)
+{
+	function ReadDword(phy) {
+		return Exe.GetHex(phy, 4).toInt(4, true);
+	}
+
+	const pat = "FF 77 14 53 FF 75 08 50 E8 ?? ?? ?? ??";
+	const basePhy = Exe.FindHex(pat);
+	if (basePhy < 0) throw Error("Pattern not found");
+
+	const callPhy = basePhy + 8;
+	const rel32   = ReadDword(callPhy + 1);
+	const widthFuncVir = Exe.Phy2Vir(callPhy + 5 + rel32, CODE);
+
+	const retnPhy = basePhy + 0x0D;
+	const retnVir = Exe.Phy2Vir(retnPhy, CODE);
+
+	let code = "";
+	const markImm32After2 = () => code.byteCount() + 2;
+	const markImm32After1 = () => code.byteCount() + 1;
+	const markRel32After1 = () => code.byteCount() + 1;
+	const markRel32After2 = () => code.byteCount() + 2;
+
+	code += "50";
+
+	code += "83FB64";
+	const offJgFbRel = markRel32After2();  code += "0F8F00000000";
+
+	code += "8B4508";
+	code += "85C0";
+	const offJeFbRel = markRel32After2();  code += "0F8400000000";
+
+	code += "80385E";
+	const offJne1FbRel = markRel32After2(); code += "0F8500000000";
+
+	code += "8078075B";
+	const offJne2FbRel = markRel32After2(); code += "0F8500000000";
+
+	code += "8078095D";
+	const offJne3FbRel = markRel32After2(); code += "0F8500000000";
+
+	code += "56" + "57" + "8B7508";
+	const offLeaBufImm = markImm32After2(); code += "8D3D00000000";
+	code += "31C9";
+
+	code += "8A06" + "84C0" + "7412";
+	code += "3C5E" + "7409";
+	code += "8807" + "46" + "47" + "41" + "EBEF";
+	code += "90" + "90";
+	code += "83C607" + "EBE8";
+	code += "C60700" + "5F" + "5E";
+
+	code += "FF7714" + "51";
+	const offPushBufImm = markImm32After1(); code += "6800000000";
+	code += "8B44240C" + "50" + "89F9";
+
+	const offCallMainRel = markRel32After1(); code += "E800000000";
+	code += "58"; // pop eax (restore saved arg1)
+	const offJmpMainRel  = markRel32After1(); code += "E900000000";
+
+	const offFallback = code.byteCount();
+
+	code += "58" + "FF7714" + "53" + "FF7508" + "50" + "89F9";
+	const offCallFbRel = markRel32After1(); code += "E800000000";
+	const offJmpFbRel  = markRel32After1(); code += "E900000000";
+
+	const bufferSize = 0x1000;
+	const codeSize = code.byteCount();
+	const codeAligned = (codeSize + 0x0F) & ~0x0F;
+
+	const args = {
+		allocSize: bufferSize + codeAligned,
+		jcOffset: bufferSize,
+		nops: retnPhy - (basePhy + 5),
+
+		postProc: function(finalCode, freeVir, procArgs) {
+
+			const bufFill = "01".repeat(procArgs.bufferSize);
+
+			const pad = "90".repeat(procArgs.codeAligned - procArgs.codeSize);
+
+			let full = bufFill + finalCode + pad;
+
+			const bufferVir = freeVir;
+			const codeVir   = freeVir + procArgs.bufferSize;
+			const baseOff   = procArgs.bufferSize;
+
+			function writeU32LE(hex, byteOff, v) {
+				const b0 = (v       & 0xFF).toString(16).padStart(2,'0');
+				const b1 = ((v>>8)  & 0xFF).toString(16).padStart(2,'0');
+				const b2 = ((v>>16) & 0xFF).toString(16).padStart(2,'0');
+				const b3 = ((v>>24) & 0xFF).toString(16).padStart(2,'0');
+				const rep = (b0+b1+b2+b3).toUpperCase();
+				const i = byteOff * 2;
+				return hex.slice(0,i) + rep + hex.slice(i+8);
+			}
+
+			function patchRel32_JccNear(relImmOff, targetVir) {
+				const opStartOff = relImmOff - 2;
+				const nextVir = codeVir + opStartOff + 6;
+				const rel = (targetVir - nextVir) >>> 0;
+				full = writeU32LE(full, baseOff + relImmOff, rel);
+			}
+
+			function patchRel32_E8E9(relImmOff, targetVir) {
+				const opStartOff = relImmOff - 1;
+				const nextVir = codeVir + opStartOff + 5;
+				const rel = (targetVir - nextVir) >>> 0;
+				full = writeU32LE(full, baseOff + relImmOff, rel);
+			}
+
+			full = writeU32LE(full, baseOff + procArgs.offLeaBufImm,  bufferVir >>> 0);
+			full = writeU32LE(full, baseOff + procArgs.offPushBufImm, bufferVir >>> 0);
+
+			const fallbackVir = codeVir + procArgs.offFallback;
+
+			patchRel32_JccNear(procArgs.offJgFbRel,   fallbackVir);
+			patchRel32_JccNear(procArgs.offJeFbRel,   fallbackVir);
+			patchRel32_JccNear(procArgs.offJne1FbRel, fallbackVir);
+			patchRel32_JccNear(procArgs.offJne2FbRel, fallbackVir);
+			patchRel32_JccNear(procArgs.offJne3FbRel, fallbackVir);
+
+			patchRel32_E8E9(procArgs.offCallMainRel, procArgs.widthFuncVir);
+			patchRel32_E8E9(procArgs.offJmpMainRel,  procArgs.retnVir);
+			patchRel32_E8E9(procArgs.offCallFbRel,   procArgs.widthFuncVir);
+			patchRel32_E8E9(procArgs.offJmpFbRel,    procArgs.retnVir);
+
+			return full;
+		},
+
+		procArgs: {
+			bufferSize,
+			codeSize,
+			codeAligned,
+
+			// offsets
+			offLeaBufImm,
+			offPushBufImm,
+
+			offJgFbRel,
+			offJeFbRel,
+			offJne1FbRel,
+			offJne2FbRel,
+			offJne3FbRel,
+
+			offCallMainRel,
+			offJmpMainRel,
+			offFallback,
+			offCallFbRel,
+			offJmpFbRel,
+
+			// targets
+			widthFuncVir,
+			retnVir
+		}
+	};
+
+	AutoHook(basePhy, code, args);
+
+	return true;
+};
+
+FixSelectMenuWidthExpansion.validate = () => true;

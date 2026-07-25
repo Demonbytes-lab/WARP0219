@@ -1,0 +1,94 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) ?-2023 *Various authors*                                 #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind, CrazyBebop                                   #
+#   Created Date  : 2020-08-26                                             #
+#   Last Modified : 2026-03-29                                             #
+#                                                                          #
+############################################################################
+
+CustomSpecials:
+    title : SPECIAL CUSTOMIZATIONS
+    mutex : false
+    color : deeppink
+    
+    patches:
+        - CustomShields:
+            title : Enable Custom Shields
+            recommend : no
+            author : Neo-Mind , CrazyBebop
+            desc : Enables custom shield sprites beyond the default set by loading shield definitions from lua files (similar to the Xray system). Required for servers with custom shield graphics.
+        
+        - CustomJobs:
+            title : Enable Custom Jobs (Reforged)
+            recommend : no
+            author : CrazyBebop
+            desc : Adds support for custom job classes beyond the official set. Jobs are defined via lua files in the data folder. Required for servers with custom classes like Druid or other fan-made jobs.
+
+        - CustomHomuns:
+            title : Enable Custom Homunculi
+            recommend : no
+            author : Neo-Mind
+            desc : Enables custom homunculus types beyond the official set using lua files. Uses the same <b>'ReqJobName'</b> function as custom jobs, so no extra configuration files are needed beyond the job lua.
+
+        - AddLuaOverrides:
+            title : Add Chris' lua overrides [Experimental]
+            recommend : no
+            author : llchrisll , Neo-Mind
+            desc : Loads additional lua override files by llchrisll that extend and patch the client's existing lua tables and functions. Adds quality-of-life improvements and fixes. See <a href="https://llchrisll.github.io/ROTPDocs/addons/cls/?h=lua">documentation</a> for the full list of changes. Experimental.
+
+        - AllowAPBarforAllJobs:
+            title : Allow AP Bar for all Jobs
+            recommend : no
+            author : Skylove, Singe-Horizontal
+            desc : Displays the AP (Activity Points) bar for all job classes, not just 4th jobs. Internally treats every class as a 4th job for the AP gauge check. Useful for servers that give AP to all classes.
+
+        - RemoveMaxNumbersLimit:
+            title : Remove the limit of max number displayed in damage/heal
+            recommend : no
+            author : 4144
+            desc : Removes the cap on displayed damage, healing, and other floating numbers. Without this, very large numbers get clamped to a maximum display value. Required for high-rate servers with large damage output.
+
+CustomSkills:
+    title : SKILL CUSTOMIZATIONS
+    mutex : false
+    color : deeppink
+    
+    patches:
+        - CustomPlayerSkills:
+            title : Enable Custom Player skills [Experimental]
+            recommend : no
+            author : Unknown
+            desc : Enables custom player skills beyond the official skill list by loading definitions from lua files. Required for servers that add new skills. Experimental -- may require careful lua configuration.
+        
+        - CustomHomunSkills:
+            title : Enable Custom Homunculus skills [Experimental]
+            recommend : no
+            author : Unknown
+            desc : Enables custom homunculus skills beyond the official list by loading definitions from lua files. Required for servers that add new homunculus abilities. Experimental.
+        
+        - CustomMerceSkills:
+            title : Enable Custom Mercenary skills [Experimental]
+            recommend : no
+            author : Unknown
+            desc : Enables custom mercenary skills beyond the official list by loading definitions from lua files. Required for servers that add new mercenary abilities. Experimental.
+

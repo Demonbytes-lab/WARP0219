@@ -1,0 +1,60 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 CrazyBebop                                         *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Andre (hex edit), CrazyBebop (WARP patch)             *
+*   Created Date  : 2026-02-25                                             *
+*   Last Modified : 2026-02-25                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Increase lightmap quality by changing the lightmap subdivision
+///        from 1 to 4, resulting in 4x higher resolution ground shadows.
+///
+IncreaseLightmapQuality = function(_)
+{
+	$$(_, 1, `Find the lightmap resolution parameter`)
+
+	//  6A 00          push 0
+	//  6A 00          push 0
+	//  6A 00          push 0
+	//  6A 00          push 0
+	//  6A 01          push 1         <-- lightmap subdivision (1 = default)
+	//  8D 85 FC FF FB FF  lea eax, [ebp-40004h]  (large stack buffer)
+	const code =
+		" 6A 00"              //push 0
+	+	" 6A 00"              //push 0
+	+	" 6A 00"              //push 0
+	+	" 6A 00"              //push 0
+	+	" 6A 01"              //push 1
+	+	" 8D 85 FC FF FB FF"  //lea eax, [ebp-40004h]
+	;
+
+	const addr = Exe.FindHex(code);
+	if (addr < 0)
+		throw Error("Lightmap pattern not found");
+
+	$$(_, 2, `Change subdivision from 1 to 4 for 4x resolution`)
+	Exe.SetUint8(addr + 9, 4); //byte 9 = the 01 in the 5th "6A 01"
+
+	return true;
+};

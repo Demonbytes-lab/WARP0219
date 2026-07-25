@@ -1,0 +1,184 @@
+/**************************************************************************\
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Created Date  : 2026-07-21                                             *
+*   Last Modified : 2026-07-21                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Support for the inline XOR string obfuscation used from the 2026
+///        clients onwards.
+///
+/// Most string literals are no longer present as plain text. They are stored
+/// as ciphertext (either a 16 byte constant in .rdata pulled in with an SSE
+/// load, or a run of inline "mov [ebp-x], imm32" stores), copied into a
+/// lazily initialised static buffer and decrypted in place at first use by
+///
+///     Decryptor(buf, lenLo, lenHi, keyLo, keyHi)
+///     plain[i] = cipher[i] ^ ((key64 >> ((i & 7) * 8)) & 0xFF)
+///     key64    = (keyHi << 32) | keyLo
+///
+/// which on the 2026-02-19 client sits at 0x005A45E0 with ~2437 call sites.
+///
+/// Consequence: Exe.FindText can never see those strings, and a patch that
+/// concludes "the client removed this feature" because the string is missing
+/// is simply wrong. Look here first.
+///
+/// The important property for patching is that BOTH the length AND the key are
+/// pushed as plain immediates right before the CALL. So for a *known* plaintext
+/// we can compute the exact ciphertext that a given call site would have to be
+/// using, and then confirm it by finding those bytes in the image. No emulation
+/// of the constant setup is needed and there is nothing build specific to
+/// hardcode.
+///
+
+///
+/// \brief Locates every decryptor call site that produces the given plaintext.
+///
+/// \param text     The expected plaintext (without the terminating NUL)
+/// \param winSize  How far back from the CALL the inline ciphertext stores may
+///                 be looked for (only used when the ciphertext is not stored
+///                 as one contiguous blob)
+///
+/// \return Array of objects with PHYSICAL addresses:
+///           push - the first PUSH of the 5 argument pushes
+///           buf  - the "push <reg>" holding the buffer pointer
+///           call - the CALL to the decryptor
+///         Empty array when the client does not use encrypted strings or the
+///         plaintext genuinely is not present.
+///
+FindEncStrSites = function(text, winSize = 0x400)
+{
+	const _ = `FindEncStrSites : `;
+
+	const bufLen = text.length + 1; //the NUL terminator is part of the decrypted buffer
+	if (bufLen < 8)
+		throw Error(_ + `'${text}' is too short to be identified reliably`);
+
+	//----------------------------------------------------------------------
+	// 1) Every argument setup with a matching length.
+	//
+	//      push keyHi ; push keyLo ; push 0 ; push <len> ; push <reg> ; call
+	//
+	//    The buffer push and the CALL are verified afterwards so that we do
+	//    not have to spell out all 8 "push reg" opcodes in the pattern.
+	//----------------------------------------------------------------------
+	const lenPush = (bufLen < 0x80)
+		? " 6A" + bufLen.toHex(1)
+		: " 68" + bufLen.toHex(4);
+
+	const prefix =
+		" 68 ?? ?? ?? ??"   //push keyHi
+	+	" 68 ?? ?? ?? ??"   //push keyLo
+	+	" 6A 00"            //push lenHi (always 0 - no string is 4GB long)
+	+	lenPush             //push lenLo
+	;
+	const tailPos = prefix.byteCount();
+
+	const cands = Exe.FindHexN(prefix);
+	if (cands.isEmpty())
+		return [];
+
+	//----------------------------------------------------------------------
+	// 2) Derive the ciphertext each candidate would need and look for it.
+	//----------------------------------------------------------------------
+	const result = [];
+
+	cands.forEach( memAddr =>
+	{
+		const bufAddr  = memAddr + tailPos;
+		const pushOp   = Exe.GetUint8(bufAddr);
+		if (pushOp < 0x50 || pushOp > 0x57)     //not a "push reg"
+			return;
+
+		const callAddr = bufAddr + 1;
+		if (Exe.GetUint8(callAddr) !== 0xE8)    //not a direct CALL
+			return;
+
+		const keyHi = Exe.GetUint32(memAddr + 1);
+		const keyLo = Exe.GetUint32(memAddr + 6);
+
+		//key bytes in little endian order - keyLo covers 0..3, keyHi covers 4..7
+		const kb = [];
+		for (let i = 0; i < 4; i++)
+			kb.push((keyLo >>> (8 * i)) & 0xFF);
+		for (let i = 0; i < 4; i++)
+			kb.push((keyHi >>> (8 * i)) & 0xFF);
+
+		//cipher[i] = plain[i] ^ key[i & 7]
+		let cipher = "";
+		for (let i = 0; i < bufLen; i++)
+		{
+			const pc = (i === bufLen - 1) ? 0 : text.charCodeAt(i);
+			cipher += (pc ^ kb[i & 7]).toHex(1);
+		}
+
+		if (ConfirmEncStrCipher(cipher, callAddr, winSize))
+			result.push({push: memAddr, buf: bufAddr, call: callAddr});
+	});
+
+	return result;
+};
+
+///
+/// \brief Checks whether the given ciphertext (hex string) is actually present
+///        in the client for the call site at callAddr.
+///
+/// Two storage forms occur:
+///   a) one contiguous blob - a 16 byte SSE constant in .rdata, or a movq/movlpd
+///      pair. Then the first 8 bytes appear verbatim somewhere in the file.
+///      8 bytes derived from a per-site random key make a false positive
+///      impossible for practical purposes.
+///   b) a run of inline "mov [ebp-x], imm32" stores. Those are 4 bytes at a
+///      time and can be interleaved with unrelated instructions, so look for
+///      the DWORD sized chunks in order inside a window before the CALL.
+///
+ConfirmEncStrCipher = function(cipher, callAddr, winSize)
+{
+	const bytes = cipher.trim().split(/\s+/);
+
+	//---- (a) contiguous, anywhere in the file (NOT just .text) --------------
+	const blob = " " + bytes.slice(0, 8).join(" ");
+	if (Exe.FindHex(blob, 0, Exe.FileSize) >= 0)
+		return true;
+
+	//---- (b) inline DWORD stores, in order, inside a window ----------------
+	const chunks = [];
+	for (let i = 0; i + 4 <= bytes.length && chunks.length < 3; i += 4)
+		chunks.push(" " + bytes.slice(i, i + 4).join(" "));
+
+	if (chunks.length < 2)
+		return false;
+
+	const winBeg = Math.max(0, callAddr - winSize);
+	const starts = Exe.FindHexN(chunks[0], winBeg, callAddr);
+	if (!IsArr(starts) || starts.isEmpty())
+		return false;
+
+	return starts.some( begin =>
+	{
+		let at = begin + 4;
+		for (let i = 1; i < chunks.length; i++)
+		{
+			at = Exe.FindHex(chunks[i], at, callAddr);
+			if (at < 0)
+				return false;
+			at += 4;
+		}
+		return true;
+	});
+};

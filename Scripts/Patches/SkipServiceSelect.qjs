@@ -1,0 +1,172 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Shinryo                                           *
+*   Copyright (C) 2017-2020 *Unknown*                                      *
+*   Copyright (C) 2015-2023 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Shinryo, Neo-Mind                                      *
+*   Created Date  : 2020-11-10                                             *
+*   Last Modified : 2023-08-26                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief NOP out the conditional jump / change conditional move to MOV
+///        This ensures g_hideAccountList is always set to 1
+///
+SkipServiceSelect = function(_)
+{
+    const tag = "SkipServiceSelect : ";
+
+    let straddr = Exe.FindText("passwordencrypt");
+    if (straddr < 0)
+        straddr = Exe.FindText("extendedslot");
+
+    /**==================================================================
+    CORRECTION (2026-07-21) of the note that used to sit here.
+
+    The previous verdict - "the clientinfo tag pool and g_hideAccountList
+    were removed from the 2026 exe" - was WRONG. It was reached from
+    Exe.FindText coming up empty, which proves nothing on these clients:
+    from 2026 onwards nearly every literal is XOR encrypted and only
+    materialises at runtime (see Scripts/Support/EncStrings.qjs).
+
+    Decrypting the ~2437 decryptor call sites of 2026-02-19 shows both
+    tags alive and well, in SelectClientInfo (0x00AD2A00):
+
+        'hideaccountlist'  args at 0x00AD4B7E, call 0x00AD4B8D
+        'extendedslot'     args at 0x00AD4C5E, call 0x00AD4C6D
+
+    and g_hideAccountList is at 0x016D3B01, written from
+    0x00AD4BC8 with exactly the CMOVNZ shape this patch has always
+    targeted - only with an unrelated instruction now scheduled between
+    the CMOVNZ and the store, which is why the old contiguous pattern
+    missed it.
+    ==================================================================**/
+    if (straddr < 0)
+        return SkipServiceSelect_Enc(_);
+
+    $$(tag + "Found string at 0x" + straddr.toString(16));
+
+    let code, repl;
+    if (Exe.Version < 11) {
+        code =
+            JZ(0x07)                     // jz short _skip
+        +   MOV(BYTE_PTR, [POS3WC], 1)   // mov byte ptr [g_hideAccountList], 1
+        +   PUSH(straddr);               // push offset "passwordencrypt"
+        repl = 0x9090; // jz short → nop+nop
+    } else {
+        code =
+            CMOVNZ(R32, R32)             // cmovnz regA, regB
+        +   MOV([POS4WC], R8)            // mov [g_hideAccountList], reg8
+        +   (Exe.Version > 11.0 ?
+             MOV(R32, R32) : "")         // 
+        +   PUSH(straddr);               // push offset "extendedslot"
+        repl = 0x8B90; // cmovnz → nop+mov
+    }
+
+    let addr = Exe.FindHex(code);
+    if (addr < 0)
+        throw Error("Could not find SkipServiceSelect pattern");
+
+    Exe.SetUint16(addr, repl);
+
+    return true;
+};
+
+///
+/// \brief Variant for the 2026+ clients where the clientinfo tag names are
+///        XOR encrypted, so there is no PUSH <offset "extendedslot"> to anchor
+///        on any more.
+///
+/// The generated code itself is unchanged. For 2026-02-19 the block reads
+///
+///     0x00AD4B8D  call    <decryptor>            ; -> "hideaccountlist"
+///     0x00AD4BA2  call    0x00AFA6B0             ; tag lookup, result in EAX
+///     0x00AD4BA7  movzx   ecx, byte [0x016D3B01] ; g_hideAccountList
+///     0x00AD4BAE  test    eax, eax
+///     0x00AD4BB6  mov     edx, 1
+///     0x00AD4BBB  cmovne  ecx, edx
+///     0x00AD4BBE  mov     [ebp-0x138], imm32     ; unrelated, scheduled in between
+///     0x00AD4BC8  mov     [0x016D3B01], cl
+///
+/// so the anchor is the decrypted tag instead of the plain one, and every
+/// register relation is verified before anything is written:
+///   - the store must target the same global the MOVZX read
+///   - the CMOVNZ destination must be the register the store writes
+///   - the CMOVNZ source must be a register that was just loaded with 1
+/// If any of those does not hold we throw rather than patch a guess.
+///
+SkipServiceSelect_Enc = function(_)
+{
+    const REG = ['eax','ecx','edx','ebx','esp','ebp','esi','edi'];
+
+    $$(_, 2.1, `Locate the encrypted 'hideaccountlist' clientinfo tag`)
+    const sites = FindEncStrSites("hideaccountlist");
+    if (sites.isEmpty())
+        throw Error("'hideaccountlist' not found (neither plain nor encrypted)");
+
+    if (sites.length > 1)
+        throw Error(`'hideaccountlist' is used ${sites.length} times - refusing to guess`);
+
+    const base = sites[0].call + 5;
+
+    $$(_, 2.2, `Find the read of g_hideAccountList - movzx regA, byte ptr [g]`)
+    const mzAddr = Exe.FindHex(" 0F B6 ??" + POS4WC, base, base + 0x40);
+    if (mzAddr < 0)
+        throw Error("g_hideAccountList read not found");
+
+    if ((Exe.GetUint8(mzAddr + 2) & 0xC7) !== 0x05) //must be [disp32], no base register
+        throw Error("g_hideAccountList read is not a direct global access");
+
+    const gvar = Exe.GetUint32(mzAddr + 3);
+
+    $$(_, 2.3, `Find the CMOVNZ that forces it to 1 when the tag was present`)
+    const cmAddr = Exe.FindHex(" 0F 45 ??", mzAddr, mzAddr + 0x30);
+    if (cmAddr < 0)
+        throw Error("CMOVNZ not found after the g_hideAccountList read");
+
+    const cmModRM = Exe.GetUint8(cmAddr + 2);
+    if ((cmModRM & 0xC0) !== 0xC0)
+        throw Error("CMOVNZ is not register to register");
+
+    const dstReg = (cmModRM >> 3) & 7;
+    const srcReg = cmModRM & 7;
+
+    $$(_, 2.4, `The source register must have just been loaded with 1`)
+    if (Exe.FindHex((0xB8 + srcReg).toHex(1) + " 01 00 00 00", mzAddr, cmAddr) < 0)
+        throw Error(`CMOVNZ source ${REG[srcReg]} is not the constant 1`);
+
+    $$(_, 2.5, `The store must write the CMOVNZ destination back into the same global`)
+    const stAddr = Exe.FindHex(" 88 ??" + gvar.toHex(), cmAddr, cmAddr + 0x20);
+    if (stAddr < 0)
+        throw Error("Store back into g_hideAccountList not found");
+
+    const stModRM = Exe.GetUint8(stAddr + 1);
+    if ((stModRM & 0xC7) !== 0x05 || ((stModRM >> 3) & 7) !== dstReg)
+        throw Error("Store does not write the CMOVNZ destination register");
+
+    $$(_, 2.6, `Turn 'cmovnz regA, regB' into 'nop ; mov regA, regB' so the flag is
+                always taken from the constant 1`)
+    Exe.SetUint16(cmAddr, 0x8B90);
+
+    return true;
+};

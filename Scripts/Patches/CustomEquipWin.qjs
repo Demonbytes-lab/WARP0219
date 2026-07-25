@@ -1,0 +1,322 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2020-2024 Functor                                        *
+*   Copyright (C) 2020-2024 CH.C (jchcc)                                   *
+*   Copyright (C) 2020-2024 Andrei Karas (4144)                            *
+*   Copyright (C) 2020-2024 X-EcutiOnner (xex.ecutionner@gmail.com)        *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Functor, CH.C (jchcc), Andrei (4144), X-EcutiOnner,    *
+*                    CrazyBebop                                            *
+*   Created Date  : 2020-11-11                                             *
+*   Last Modified : 2026-03-27                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Change the coords used for equipment swap button both on the
+///        equipment window and costume window inside SWAPEQUIPMENTWNDINFO function.
+///
+NoEquipSwap = function(_)
+{
+	$$(_, 1.1, `Find the location where equipment function is called`)
+	let prefix =
+		CALL(NEG3WC)            //call func#1
+	+	MOV(EAX, [EDI, 0x18])   //mov eax, dword ptr [edi + 18h]
+	+	MOV(ECX, [EDI, POS2WC]) //mov ecx, dword ptr [edi + dispA]
+	;
+
+	let suffix =
+		SUB(EAX, 0x14)          //sub eax, 14h
+	+	(Exe.Version <= 11
+	?
+		MOV(EDX, [ECX])         //mov edx, dword ptr [ecx]
+	:
+		''
+	)
+	+	PUSH_EAX                //push eax
+	;
+	let addr = Exe.FindHex(prefix + suffix);
+	if (addr > 0)
+	{
+		$$(_, 1.2, `Change the SUB to ADD`)
+		Exe.SetHex(addr + prefix.byteCount(), ADD(EAX, 0x14));
+	}
+	else if (Exe.BuildDate > 20210100)
+	{
+		prefix =
+			MOV(ECX, [EDI, POS2WC]) //mov ecx, dword ptr [edi + dispA]
+		;
+
+		suffix =
+			PUSH(0xA7)              //push A7h
+		+	PUSH(0xC1)              //push C1h
+		+	MOV(EAX, [ECX])         //mov eax, dword ptr [ecx]
+		;
+
+		addr = Exe.FindHex(prefix + suffix);
+		if (addr > 0)
+		{
+			$$(_, 1.2, `Change the A7 to CF`)
+			Exe.SetUint32(addr + prefix.byteCount() + 1, 0xCF);
+		}
+	}
+	if (addr < 0)
+		throw Error("Equip Function CALL missing");
+
+	// TODO - This half needs live running to determine the coords
+	if (Exe.BuildDate < 20211000)
+	{
+		$$(_, 2.1, `Find the location where costume function is called`)
+		const code =
+			MOV(ECX, [ESI, POS2WC]) //mov ecx, dword ptr [esi + dispB]
+		+	TEST(ECX, ECX)          //test ecx, ecx
+		+	JZ(0x6F)                //jz short _skip
+		+	MOV(EAX, [ESI, POS1WC]) //mov eax, dword ptr [esi + dispC] ; dispC < dispB
+		+	MOV(EDX, [ECX])         //mov edx, dword ptr [ecx]
+		+	ADD(EAX, 0x93)          //add eax, 93h
+		+	PUSH_EAX                //push eax
+		;
+		addr = Exe.FindHex(code);
+		if (addr < 0)
+			throw Error("Costume function CALL missing");
+
+		$$(_, 2.2, `Change 93h to FFh`)	
+		Exe.SetUint8(addr + code.byteCount() - 5, 0xFF);
+	}
+	return true;
+};
+
+///
+/// \brief Disable for Unsupported Clients - Check for Reference
+///
+NoEquipSwap.validate = () =>
+	Exe.BuildDate >= 20170208;
+
+///
+/// \brief Change the JNZ after comparison to remove title window button
+///        on the equipment window inside EQUIPMENTWNDINFO function.
+///
+NoEquipWinTitle = function(_)
+{
+	if (Exe.BuildDate >= 20240000)
+	{
+		let prefix =
+			JNZ(0x2E)
+		+	MOV(EDI, [EDI, POS2WC])
+		+	PUSH(0x0C58)
+		+	CALL(ALLWC)
+		+	PUSH(0x0A7D)
+		+	MOV(ESI, EAX)
+		+	CALL();
+
+		let addr = Exe.FindHex(prefix);
+		if (addr < 0)
+			throw Error("Pattern#1 not found");
+
+		Exe.SetUint8(addr, 0xEB); // JNZ → JMP
+
+		const equipTabOff = Exe.BuildDate >= 20250700 ? 0x120 : 0x100;
+		const equipTypeOff = Exe.BuildDate >= 20250700 ? 0xF0 : 0xD0;
+
+		let prefix2 =
+			MOV(EDX, [ESI, equipTabOff])
+		+	CMP(ECX, 0x02)
+		+	MOV([ESI, equipTypeOff], ECX)
+		+	MOV(ECX, EDX)
+		+	MOV(EAX, [EDX])
+		+	MOV(EAX, [EAX, 0x38]);
+
+		const tgt = Exe.FindHex(prefix2);
+		if (tgt < 0)
+			throw Error("Pattern#2 not found");
+
+		const ret_phy = tgt + 6;
+		const ret_va  = Exe.Phy2Vir(ret_phy, CODE);
+
+		const hookCode =
+			CMP(ECX, 0x02)
+		+	JNZ(0x01)
+		+	INC(ECX)
+		+	JMP(0x04)
+		+	WCp + WCp + WCp + WCp
+		+	MOV(EDX, [ESI, equipTabOff])
+		+	JMP(0x03)
+		+	WCp + WCp + WCp
+		+	PUSH(ret_va)
+		+	"C3" + "00";
+
+		AutoHook(tgt, [hookCode], { nops: 0 });
+
+		return true;
+	}
+
+	$$(_, 1, `Find the location where equipment function is called`)
+	let prefix, suffix;
+	if (ROC.FullVer == 14.29)
+	{
+		prefix =
+			CMP([EDI, POS2WC], 0)     //cmp dword ptr [edi + UIEquipWnd.m_typeWnd], 0
+		;
+		suffix =
+			JNE(WCp)                  //jnz short _valid
+		+	MOV(R32, [EDI, POS2WC])   //mov regA, dword ptr [edi + dispA]
+		+	PUSH(0xC58)               //push 0C58h
+		+	CALL(ALLWC)               //call MsgStr
+		+	PUSH(0xA7D)               //push 0A7Dh
+		+	MOV(R32, EAX)             //mov regB, eax
+		+	CALL()                    //call MsgStr
+		;
+	}
+	else
+	{
+		const delta = Exe.BuildDate > 20170000 ? POS2WC : WCp;
+		prefix =
+			CALL(NEG3WC)              //call UITabControl_AddTab
+		+	CMP([EDI, delta], 0)      //cmp dword ptr [edi + UIEquipWnd.m_typeWnd], 0
+		;
+		suffix =
+			JNZ(0x19)                 //jnz short _valid
+		+	PUSH(0xA7D)               //push 0A7Dh
+		+	CALL(ALLWC)               //call MsgStr
+		+	MOV(ECX, [EDI, POS2WC])   //mov ecx, dword ptr [edi + UIEquipWnd.m_UITabControl]
+		+	ADD(ESP, 4)               //add esp, 4
+		+	PUSH_EAX                  //push eax
+		+	CALL()                    //call UITabControl_AddTab
+		;
+
+		/* - Used for debugging
+		const addTabOffsets = [1, 35];
+		const typeWndOffset = [7, 4];
+		const msgStrOffset = 20;
+		const tabControlOffset = [26, 4];
+		*/
+	}
+	const addr = Exe.FindHex(prefix + suffix);
+	if (addr < 0)
+		throw Error("Pattern not found");
+
+	/*
+	for (let i = 0; i < addTabOffsets.length; i++)
+	{
+		logRawFunc("UITabControl_AddTab", addr, addTabOffsets[i]);
+	}
+	logField("UIEquipWnd::m_typeWnd", addr, typeWndOffset);
+	logRawFunc("MsgStr", addr, msgStrOffset);
+	logField("UIEquipWnd::m_UITabControl", addr, tabControlOffset);
+	*/
+
+	$$(_, 2, `Change JNZ to JMP`)
+	Exe.SetJMP(addr + prefix.byteCount());
+
+	return true;
+};
+
+///
+/// \brief Disable for Older Clients - Check for Reference
+///
+NoEquipWinTitle.validate = function()
+{
+	if (Exe.BuildDate >= 20240000) return true;
+	return (ROC.IsRenewal && Exe.BuildDate >= 20141126) || Exe.BuildDate >= 20150225;
+};
+
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2020-2024 Functor                                        *
+*   Copyright (C) 2020-2024 CH.C (jchcc)                                   *
+*   Copyright (C) 2020-2024 Andrei Karas (4144)                            *
+*   Copyright (C) 2020-2024 X-EcutiOnner (xex.ecutionner@gmail.com)        *
+*   Copyright (C) 2026 CrazyBebop                                          *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Functor, CH.C (jchcc), Andrei (4144), X-EcutiOnner,   *
+*                    CrazyBebop                                            *
+*   Created Date  : 2026-03-27                                             *
+*   Last Modified : 2026-03-27                                             *
+*   Thanks        : Gerzzie (RDL)                                           *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Hides the Equipment Attribute button from the Equipment Window by
+///        NOPing its AddChildDirect call. The button object is still created
+///        (so no crashes) but never added to the window, making it invisible.
+///
+DisableEquipAttrButton = function(_)
+{
+	$$(_, 1, `Find the Equipment Attribute button bitmap string`);
+	const bmpVA = Exe.FindText(
+		"\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_e_ability_a.bmp"
+	);
+	if (bmpVA < 0)
+		throw Error("btn_e_ability_a.bmp string not found");
+
+	$$(_, 2, `Find PUSH of the bitmap string in code`);
+	const pushAddr = Exe.FindHex(PUSH(bmpVA));
+	if (pushAddr < 0)
+		throw Error("PUSH btn_e_ability_a not found in code");
+
+	$$(_, 3, `Find the AddChildDirect call after button setup`);
+	// Pattern: PUSH [reg+disp32] + MOV ECX,reg + CALL AddChildDirect
+	const addChildPattern =
+		" FF B7 78 01 00 00"  // PUSH [EDI+0x178]
+	+	" 8B CF"              // MOV ECX, EDI
+	+	CALL()                // CALL AddChildDirect
+	;
+	const addr = Exe.FindHex(addChildPattern, pushAddr, pushAddr + 0xC0);
+	if (addr < 0)
+		throw Error("AddChildDirect call for attribute button not found");
+
+	$$(_, 4, `Replace PUSH+MOV+CALL with stack-safe skip`);
+	// Replace the 6-byte PUSH with ADD ESP,-4 (83 EC 04) + 3 NOPs to keep stack balanced,
+	// then keep MOV ECX,EDI as-is, then replace CALL with ADD ESP,4 (83 C4 04) + 2 NOPs.
+	// Net stack effect: -4 + 4 = 0. AddChild never called.
+	Exe.SetHex(addr, " 83 EC 04 90 90 90 8B CF 83 C4 04 66 90");
+
+	return true;
+};
+
+///
+/// \brief Disable for unsupported clients - need the Equipment Attribute button bitmap
+///
+DisableEquipAttrButton.validate = function()
+{
+	return Exe.FindText(
+		"\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\btn_e_ability_a.bmp"
+	) > 0;
+};

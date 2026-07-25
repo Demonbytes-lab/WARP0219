@@ -1,0 +1,27 @@
+RemoveMaxNumbersLimit = function ()
+{
+    const anchor =
+        "B8 67 66 66 66 " +
+        "F7 EE " +
+        "C1 FA 02 " +
+        "8B FA " +
+        "C1 EF 1F " +
+        "03 FA";
+
+    const anchorVA = Exe.FindHex(anchor);
+    if (anchorVA < 0)
+        throw Error("RemoveMaxNumbersLimit: anchor pattern not found");
+
+    const capVA = Exe.FindHex(
+        "0F 4F F0",
+        anchorVA - 0x40,
+        anchorVA
+    );
+
+    if (capVA < 0)
+        throw Error("RemoveMaxNumbersLimit: cmovg cap not found");
+
+    Exe.SetHex(capVA, "90 90 90");
+
+    return true;
+};

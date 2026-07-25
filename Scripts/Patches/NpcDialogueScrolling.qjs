@@ -1,0 +1,35 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Shinryo                                           *
+*   Copyright (C) 2020-2024 Andrei Karas (4144)                            *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+\**************************************************************************/
+
+NpcDialogueScrolling = function(_)
+{
+  const pat = "83 7A 2C 10 75 ?? ??";
+  const pos = Exe.FindHex(pat);
+  if (pos < 0)
+  {
+    // 2026-02-19 : the only unpacked base available for this build was dumped from an
+    // already-hooked process, so the JNZ has already been flipped to a JMP. A compiler
+    // never emits 'cmp dword ptr [edx+2Ch], 10h' followed by an unconditional short JMP,
+    // so this shape can only be our own earlier edit - the goal is already achieved.
+    // (Verified absent from 2025-07-16, present exactly once here.)
+    if (Exe.FindHex("83 7A 2C 10 EB") > 0)
+      return true;
+
+    throw Error("NpcDialogueScrolling pattern not found");
+  }
+
+  // 83 7A 2C 10 **75** ?? ??
+  Exe.SetHex(pos + 4, "EB");
+  return true;
+};
+
+//
+NpcDialogueScrolling.validate = () => Exe.BuildDate >= 20240713;
+// Optional alias for listing
+EnableNpcDialogueScrolling = NpcDialogueScrolling;

@@ -1,0 +1,639 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 Gerzzie (RDL)                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Gerzzie                                                *
+*   Created Date  : 2026-06-16                                             *
+*   Last Modified : 2026-06-16                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Custom full-width bottom Base/Job experience bar.
+///
+/// Draws a persistent bottom-of-screen exp bar showing Base and Job XP
+/// progress. This file is scaffolding only - draw logic comes in later tasks.
+///
+/// Spec : docs/superpowers/specs/2026-06-15-custom-bottom-exp-bar-design.md
+/// Plan : docs/superpowers/plans/2026-06-16-custom-bottom-exp-bar.md
+///
+CustomBottomExpBar = function(_)
+{
+    const BAR_H = 28;                         // window height (px): text row on top + thin block at bottom
+
+    //--- 0. anchors / shared data -------------------------------------------------
+    $$(_, 1, `Locate the on-map-entry create hook`)
+    const hookP = Exe.FindHex("E8 FB D7 DC FF 6A 01 6A 43 B9 E8 F4 31 01");
+    if (hookP < 0) throw Error("CustomBottomExpBar: create hook anchor not found (verify 2025-07-16 client)");
+    const detourP = hookP + 5;               // 0xc6bb45
+    const detourV = Exe.Phy2Vir(detourP);
+    const stolen  = Exe.GetHex(detourP, 9);  // "6A 01 6A 43 B9 E8 F4 31 01"
+    const resumeV = detourV + 9;             // 0xc6bb4e
+
+    $$(_, 2, `Allocate patch data`)
+    // shared /layout flag (1=custom, 0=vanilla). Bar auto-hides when vanilla. Fallback const-1 if
+    // GerzzieLayout infra is unavailable (non-2025 client) -> /layout check then never hides.
+    let gzlFlag;
+    try { gzlFlag = GerzzieLayout.flagAddr(_); }
+    catch (e) { gzlFlag = 0x015FB9F0; }
+    const [, gWnd]      = Exe.AddHex("00 00 00 00");   // our window*
+    const [, gSecW]     = Exe.AddHex("00 00 00 00");   // scratch: BASE section width (baseSecW = centerX-PAD)
+    const [, gSecWJ]    = Exe.AddHex("00 00 00 00");   // scratch: JOB  section width (jobSecW = (W-PAD)-centerX)
+    const [, gInnerB]   = Exe.AddHex("00 00 00 00");   // scratch: base badge x = centerX-BADGE_W
+    const [, gJobX]     = Exe.AddHex("00 00 00 00");   // scratch: UNUSED after center-meet rework (kept for stable data layout)
+    const [, gCenterX]  = Exe.AddHex("00 00 00 00");   // scratch: centerX = fill meet point + job badge x
+    const [, gFillW]    = Exe.AddHex("00 00 00 00");   // scratch: fill width
+    const [, gScaled]   = Exe.AddHex("00 00 00 00");   // scratch: pct*1000
+    const [, gStep]     = Exe.AddHex("00 00 00 00");   // scratch: vertical-segment spacing (sectionW/(VSEG+1))
+    const [, gWhite]    = Exe.AddHex("FF FF FF 00");   // text fill color (pointer arg)
+    const [, c100000]   = Exe.AddHex("A0 86 01 00");   // 100000 LE (for fimul)
+    // value/percent text: "%u (%d.%03d%%)\0" + "MAX\0" + per-section scratch buffers
+    const [, gFmt]      = Exe.AddHex("25 75 20 28 25 64 2E 25 30 33 64 25 25 29 00"); // "%u (%d.%03d%%)\0"
+    const [, gMax]      = Exe.AddHex("4D 41 58 00");                               // "MAX\0"
+    const [, gBufB]     = Exe.AddHex(" 00".repeat(0x30));   // base text buffer
+    const [, gBufJ]     = Exe.AddHex(" 00".repeat(0x30));   // job text buffer
+    // badge asset paths (EUC-KR "유저인터페이스" prefix) under data\texture\ ; cache prepends root
+    // 유저인터페이스 = C0 AF C0 FA C0 CE C5 CD C6 E4 C0 CC BD BA
+    const eucUI = "C0 AF C0 FA C0 CE C5 CD C6 E4 C0 CC BD BA";  // 유저인터페이스
+    const [, pPathB] = Exe.AddHex(eucUI + " 5C 52 44 4C 5C 45 78 70 42 61 72 55 69 5C 62 67 5F 62 61 73 65 2E 62 6D 70 00"); // ...\RDL\ExpBarUi\bg_base.bmp
+    const [, pPathJ] = Exe.AddHex(eucUI + " 5C 52 44 4C 5C 45 78 70 42 61 72 55 69 5C 62 67 5F 6A 6F 62 2E 62 6D 70 00");    // ...\RDL\ExpBarUi\bg_job.bmp
+
+    //--- 1. build the custom vtable (clone of base 0x102fe08) ----------------------
+    $$(_, 3, `Clone base UIWindow vtable 0x102fe08 (0x100 bytes)`)
+    const baseVtP = Exe.Vir2Phy(0x0102fe08);
+    const vtBytes = Exe.GetHex(baseVtP, 0x100);
+    const [, vtVir] = Exe.AddHex(vtBytes);            // our writable vtable copy
+    // (paint +0x50 and msg +0x94 are patched after we know the cave VAs - Step 4)
+
+    //--- 2. the message handler cave (vtable +0x94) --------------------------------
+    // On msg 0x9a (per-frame draw broadcast): mark dirty so +0x50 repaints. Else
+    // return 0. ecx=this; [esp+8]=msg; 6 args -> ret 0x18.
+    $$(_, 4, `Build the +0x94 message handler`)
+    const msgFwdTail =
+        " 33 C0"                               // _fwd: xor eax,eax
+    +   " C2 18 00";                           // ret 0x18
+    const segMsg =
+        " 81 7C 24 08 9A 00 00 00"            // cmp dword[esp+8], 0x9a
+    +   JNE(Filler(1))                         // jne _fwd
+    +   " C7 81 58 00 00 00 01 00 00 00"      // mov dword[ecx+0x58], 1   (invalidate)
+    +   CALL(Filler(80))                       // call paintV   (force per-frame repaint; paint preserves ecx via pushad/popad)
+    +   " 33 C0"                               // xor eax,eax
+    +   " C2 18 00"                            // ret 0x18
+    +   msgFwdTail;                            // _fwd
+    const offFwd = segMsg.byteCount() - msgFwdTail.byteCount();   // _fwd label offset
+
+    //--- 3. the paint cave (vtable +0x50): magenta clear + track + center-MEET fills ----
+    // thiscall, ecx=this, no args -> ret. Use [gWnd] as this. Preserve regs.
+    // CENTER-MEET geometry (hardcoded; Task 8 exposes as $vars):
+    //   PAD=6, BADGE_W=58, TRACK_Y=4, TRACK_H=10, FILL_Y=5, FILL_H=8.
+    //   W=screenW ; centerX=W/2.
+    //   baseSecW = centerX - PAD             (BASE region [PAD, centerX])
+    //   jobSecW  = (W-PAD) - centerX         (JOB  region [centerX, W-PAD])
+    //   BASE fill is RIGHT-anchored at centerX, grows LEFT  (x=centerX-fillW).
+    //   JOB  fill is LEFT-anchored  at centerX, grows RIGHT (x=centerX).
+    //   -> the two fills MEET at centerX. The Base/Job badge bmps are blitted LAST,
+    //      ON TOP of the fills (bg_base @ centerX-58, bg_job @ centerX).
+    // Ratio fills computed via x87 from int64 exp globals (guard total==0 -> 0).
+    $$(_, 5, `Build the +0x50 paint (center-meet track + base/job ratio fills, badges on top)`)
+    // Two-row layout: value%/percent TEXT at top (y=2), thin colored BLOCK + Base/Job badges at bottom.
+    // CTRGAP = half-gap where the two percentages meet at center: base% right-aligned to centerX-CTRGAP,
+    // job% left-aligned from centerX+CTRGAP -> the pair is centered above the Base/Job banners.
+    // block: dark track (y17,h10) + 8px colored fill (y18) + 5 vertical SEGMENT lines per side on the fills
+    const PAD = 6, BADGE_W = 58, BADGE_Y = 15, TRACK_Y = 17, TRACK_H = 10, FILL_Y = 18, FILL_H = 8, CTRGAP = 70, VSEG = 9;
+    // Auto-hide at max level: hide when base level >= MAXBASE AND job level >= MAXJOB (server caps).
+    const MAXBASE = 255, MAXJOB = 120;   // base level [0x15FB9F0], job level [0x15FB9F8]
+    // Helper: blit cached bmp <pathV> at (x = [<xVar>], y=2); guard img!=0 (skip via Filler<lab>)
+    const blitBadge = (pathV, xVar, lab) =>
+        CALL(Filler(16))                       // call 0xa90350 -> eax=mgr
+    +   " 68" + pathV.toHex(4)                 // push &path
+    +   " 8B C8"                               // mov ecx,eax  (this=mgr)
+    +   CALL(Filler(17))                       // call 0xa8d4a0 -> eax=img* (ret 4, callee cleans path)
+    +   " 85 C0"                               // test eax,eax
+    +   JE(Filler(lab))                        // jz _skip<lab>
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A 00"                               // push 0 (flag)
+    +   " 50"                                  // push eax (img)
+    +   " 6A" + BADGE_Y.toHex(1)              // push BADGE_Y (y) - badges at bottom row
+    +   " FF 35" + xVar.toHex(4)               // push [xVar] (x)
+    +   CALL(Filler(18));                      // call blit 0xa1d260 (ret 0x10)
+    // -- preamble: clear to magenta, compute center-out widths --
+    const pPre =
+        " 60"                                  // pushad
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    // --- LIVENESS: re-arm dirty flag so the dirty-gated +0xa4 Draw re-runs our +0x50 every
+    //     frame (the engine only invalidates the native BasicInfoWnd, never ours). ---
+    +   " C7 41 58 01 00 00 00"                // mov dword[ecx+0x58], 1
+    // --- clear whole surface to magenta (transparent key) ---
+    +   " 68 FF 00 FF 00"                      // push 0x00FF00FF
+    +   " FF 71 18"                            // push [ecx+0x18] h
+    +   " FF 71 14"                            // push [ecx+0x14] w
+    +   " 6A 00 6A 00"                         // push y(0) ; push x(0)
+    +   CALL(Filler(3))                        // fillrect (clear -> transparent surface)
+    // --- AUTO-HIDE: surface already cleared (transparent). Skip ALL drawing (jmp _ptail) when
+    //     (a) /layout is vanilla ([gzlFlag]==0), or (b) base level >= MAXBASE AND job level >= MAXJOB
+    //     (the server caps; exp totals can't tell max from a fresh 0% level). Bar shows nothing. ---
+    +   " A1" + gzlFlag.toHex(4)               // mov eax,[gzlFlag]
+    +   " 85 C0"                               // test eax,eax
+    +   " 74 18"                               // jz _hide        (vanilla layout)
+    +   " 81 3D F0 B9 5F 01" + MAXBASE.toHex(4) // cmp dword[0x15FB9F0], MAXBASE  (base level)
+    +   " 7C 11"                               // jl _notmax      (base < max -> draw)
+    +   " 81 3D F8 B9 5F 01" + MAXJOB.toHex(4)  // cmp dword[0x15FB9F8], MAXJOB   (job level)
+    +   " 7C 05"                               // jl _notmax      (job < max -> draw)
+    +   JMP(Filler(46))                        // _hide: jmp _ptail (both at max -> hide)
+    // _notmax:
+    // --- center-meet geometry: centerX=W/2 ; baseSecW=centerX-PAD ; jobSecW=(W-PAD)-centerX ---
+    +   " B9 E8 F4 31 01"                      // mov ecx,0x131F4E8
+    +   " 8B 81 7C 04 00 00"                   // mov eax,[ecx+0x47c]  (screenW = W)
+    +   " 89 C2"                               // mov edx,eax          (edx = W, kept for jobSecW)
+    +   " D1 E8"                               // shr eax,1            (eax = centerX)
+    +   " A3" + gCenterX.toHex(4)              // mov [gCenterX],eax    (centerX = meet point + job badge x)
+    // innerXbase = centerX - BADGE_W -> [gInnerB]  (base badge x only; disp8: BADGE_W<=127)
+    +   " 8D 48" + (0x100 - BADGE_W).toHex(1)  // lea ecx,[eax-BADGE_W]  (centerX-58)
+    +   " 89 0D" + gInnerB.toHex(4)            // mov [gInnerB],ecx     (base badge x)
+    // (job badge x = centerX, adjacent to base badge -- both full 58px, equal size; slants are
+    //  fill-colored/opaque so the inner edges meet cleanly with no gap and no overlap)
+    // baseSecW = centerX - PAD -> [gSecW]   (BASE region [PAD, centerX])
+    +   " 8D 48" + (0x100 - PAD).toHex(1)      // lea ecx,[eax-PAD]     (centerX-6)
+    +   " 89 0D" + gSecW.toHex(4)              // mov [gSecW],ecx       (baseSecW)
+    // jobSecW = (W-PAD) - centerX -> [gSecWJ]   (JOB region [centerX, W-PAD]; edx=W, eax=centerX)
+    +   " 8D 4A" + (0x100 - PAD).toHex(1)      // lea ecx,[edx-PAD]     (W-6)
+    +   " 29 C1"                               // sub ecx,eax           (-(centerX))
+    +   " 89 0D" + gSecWJ.toHex(4);            // mov [gSecWJ],ecx      (jobSecW)
+    // (badges are now drawn LAST, on top of the fills -- see pBadgeB/pBadgeJ below pTail)
+    // fillrect helper: xP/wP = push-operand strings (imm "6A xx" or mem "FF 35 <addr>"); colHex = COLORREF LE
+    const FR = (xP, yV, wP, hV, colHex) =>
+        " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 68 " + colHex                         // push color  (NOTE: space after 68 -- "68"+"7F.." => "687F" mis-sizes the instruction by 1 byte each)
+    +   " 6A" + hV.toHex(1)                     // push h
+    +   wP                                      // push w
+    +   " 6A" + yV.toHex(1)                     // push y
+    +   xP                                      // push x
+    +   CALL(Filler(3));                        // fillrect
+    const xB = " 6A" + PAD.toHex(1),       xJ = " FF 35" + gCenterX.toHex(4);
+    const wB = " FF 35" + gSecW.toHex(4),  wJ = " FF 35" + gSecWJ.toHex(4);
+    // Track = bg_bar (1x7) reproduced as horizontal stripes (the "line through the block"):
+    //   top light highlight line | dark body (where fills sit) | bottom dark line. Per-half [PAD..cX][cX..W-PAD].
+    const pTrack =
+        FR(xB, TRACK_Y, wB, TRACK_H, "33 37 53 00")    // dark track body base [PAD..centerX]
+    +   FR(xJ, TRACK_Y, wJ, TRACK_H, "33 37 53 00")    // dark track body job  [centerX..W-PAD]
+    // ===== BASE fill (right-anchored at innerXbase, grows LEFT) ===== guard total==0
+    +   " A1 D8 B9 5F 01"                      // mov eax,[0x15fb9d8] total.lo
+    +   " 0B 05 DC B9 5F 01"                   // or  eax,[0x15fb9dc] total.hi
+    +   JE(Filler(40))                         // jz _baseZero
+    // ratio = cur/total ; fillW = ratio*baseSecW
+    +   " DF 2D D8 B9 5F 01"                   // fild qword[0x15fb9d8] total
+    +   " DF 2D D0 B9 5F 01"                   // fild qword[0x15fb9d0] cur ; st0=cur,st1=total
+    +   " DE F1"                            // fdivrp st1,st0 -> st0=cur/total (ratio)
+    +   " DA 0D" + gSecW.toHex(4)              // fimul dword[gSecW] (baseSecW) -> ratio*baseSecW
+    +   " DB 1D" + gFillW.toHex(4)             // fistp dword[gFillW]  (FPU stack now empty)
+    +   JMP(Filler(41));                       // jmp _baseDraw
+    const pBegin = pPre + pTrack;
+
+    const pBaseZero =
+        " C7 05" + gFillW.toHex(4) + " 00 00 00 00"; // _baseZero (40): mov [gFillW],0
+
+    // -- BASE fillrect (RIGHT-anchored at centerX, grows LEFT) -- (label _baseDraw 41)
+    const pBaseFill =
+    // _baseDraw (41): x = centerX - fillW ; fillrect(x, y=FILL_Y, w=[gFillW], h=FILL_H, base color)
+        " 8B 15" + gCenterX.toHex(4)           // mov edx,[gCenterX] (centerX = meet point)
+    +   " 2B 15" + gFillW.toHex(4)             // sub edx,[gFillW]  (x = centerX - fillW)  GROWS LEFT
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 68 FF AD 00 00"                      // push 0x0000ADFF (base color)
+    +   " 6A" + FILL_H.toHex(1)                // push FILL_H (8)
+    +   " FF 35" + gFillW.toHex(4)             // push [gFillW] w
+    +   " 6A" + FILL_Y.toHex(1)                // push FILL_Y (5)
+    +   " 52"                                  // push edx (x = centerX - fillW)
+    +   CALL(Filler(3));                       // fillrect
+
+    // -- BASE value + 3-decimal % text (outlined) ; "MAX" when level maxed --
+    // base cur [0x15fb9d0] total [0x15fb9d8] ; text at x=8, y=2, fontH=0xC
+    // Split into pBaseTextMain (value/percent path, ends with JMP _baseTextDone) and
+    // pBaseMax (the _maxB block) so the label offsets are exact via .byteCount().
+    const pBaseTextMain =
+    // guard total==0 -> MAX
+        " A1 D8 B9 5F 01"                      // mov eax,[0x15fb9d8] total.lo
+    +   " 0B 05 DC B9 5F 01"                   // or  eax,[0x15fb9dc] total.hi
+    +   JE(Filler(50))                         // jz _maxB
+    // scaled = cur*100000/total  (x87) -> [gScaled]
+    +   " DF 2D D8 B9 5F 01"                   // fild qword[0x15fb9d8] total
+    +   " DF 2D D0 B9 5F 01"                   // fild qword[0x15fb9d0] cur ; st0=cur,st1=total
+    +   " DE F1"                            // fdivrp st1,st0 -> ratio
+    +   " DA 0D" + c100000.toHex(4)            // fimul dword[c100000]
+    +   " DB 1D" + gScaled.toHex(4)            // fistp dword[gScaled]
+    // split scaled into int (eax) and frac 0..999 (edx)
+    +   " 33 D2"                               // xor edx,edx
+    +   " A1" + gScaled.toHex(4)               // mov eax,[gScaled]
+    +   " B9 E8 03 00 00"                      // mov ecx,1000
+    +   " F7 F1"                               // div ecx -> eax=int, edx=frac
+    // wsprintfA(gBufB, gFmt, cur.lo, int, frac)
+    +   " 52"                                  // push edx (frac)  -> "%03d"
+    +   " 50"                                  // push eax (int)   -> "%d"
+    +   " FF 35 D0 B9 5F 01"                   // push dword[0x15fb9d0] (cur.lo) -> "%u"
+    +   " 68" + gFmt.toHex(4)                  // push fmt
+    +   " 68" + gBufB.toHex(4)                 // push buf
+    +   " FF 15 2C 16 FC 00"                   // call dword[0xFC162C] wsprintfA (eax = len)
+    +   " 83 C4 14"                            // add esp,0x14  (cdecl, 5 args)
+    // BASE% RIGHT-ALIGNED to (centerX - CTRGAP): textX = (centerX - CTRGAP) - len*6 (full width)
+    +   " 8D 14 40"                            // lea edx,[eax+eax*2]   (len*3)
+    +   " 03 D2"                               // add edx,edx           (len*6 ~ full text width)
+    +   " 8B 0D" + gCenterX.toHex(4)           // mov ecx,[gCenterX]    (centerX)
+    +   " 83 E9" + CTRGAP.toHex(1)             // sub ecx,CTRGAP        (right edge = centerX - gap)
+    +   " 29 D1"                               // sub ecx,edx           (textX = rightEdge - width)
+    +   " 89 0D" + gScaled.toHex(4)            // mov [gScaled],ecx     (stash textX; gScaled now free)
+    // draw outlined: ecx=this ; args right-to-left ; x = [gScaled]
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A 00"                               // p9 font flag = 0
+    +   " 6A 0C"                               // p8 fontH = 0x0C
+    +   " 6A 00"                               // p7 = 0
+    +   " 6A 00"                               // p6 outline = black (by value)
+    +   " 68" + gWhite.toHex(4)                // p5 = &fillColor (white, pointer)
+    +   " 6A 00"                               // p4 len = 0 (auto strlen)
+    +   " 68" + gBufB.toHex(4)                 // p3 str
+    +   " 6A 02"                               // p2 y = 2
+    +   " FF 35" + gScaled.toHex(4)            // p1 x = [gScaled] (centered)
+    +   CALL(Filler(4))                        // call 0xa25fc0 (ret 0x24)
+    +   JMP(Filler(51));                       // jmp _baseTextDone
+
+    const pBaseMax =
+    // _maxB (50): "MAX" RIGHT-ALIGNED to (centerX - CTRGAP) ; "MAX" full width = 3*6 = 18
+        " 8B 0D" + gCenterX.toHex(4)           // mov ecx,[gCenterX]
+    +   " 83 E9" + (CTRGAP + 18).toHex(1)      // sub ecx, CTRGAP + 18  (right edge - "MAX" width)
+    +   " 89 0D" + gScaled.toHex(4)            // mov [gScaled],ecx
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A 00"                               // p9
+    +   " 6A 0C"                               // p8 fontH
+    +   " 6A 00"                               // p7
+    +   " 6A 00"                               // p6 outline black
+    +   " 68" + gWhite.toHex(4)                // p5 &fill white
+    +   " 6A 00"                               // p4 len 0
+    +   " 68" + gMax.toHex(4)                  // p3 "MAX"
+    +   " 6A 02"                               // p2 y = 2
+    +   " FF 35" + gScaled.toHex(4)            // p1 x = [gScaled]
+    +   CALL(Filler(4));                       // call 0xa25fc0
+    // _baseTextDone (51): fall through to JOB guard
+    const pBaseText = pBaseTextMain + pBaseMax;
+
+    // -- JOB x87 guard -- (ends just before _jobZero)
+    const pJobGuard =
+        " A1 E0 B9 5F 01"                      // mov eax,[0x15fb9e0] total.lo
+    +   " 0B 05 E4 B9 5F 01"                   // or  eax,[0x15fb9e4] total.hi
+    +   JE(Filler(42))                         // jz _jobZero
+    +   " DF 2D E0 B9 5F 01"                   // fild qword[0x15fb9e0] total
+    +   " DF 2D E8 B9 5F 01"                   // fild qword[0x15fb9e8] cur
+    +   " DE F1"                            // fdivrp st1,st0 -> ratio
+    +   " DA 0D" + gSecWJ.toHex(4)             // fimul dword[gSecWJ] (jobSecW) -> ratio*jobSecW
+    +   " DB 1D" + gFillW.toHex(4)             // fistp dword[gFillW]
+    +   JMP(Filler(43));                       // jmp _jobDraw
+
+    const pJobZero =
+        " C7 05" + gFillW.toHex(4) + " 00 00 00 00"; // _jobZero (42): mov [gFillW],0
+
+    // -- JOB fillrect (LEFT-anchored at centerX, grows RIGHT) -- (label _jobDraw 43)
+    const pJobFill =
+    // _jobDraw (43): fillrect(x=[gCenterX], y=FILL_Y, w=[gFillW], h=FILL_H, job color)
+        " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 68 53 BB FF 00"                      // push 0x00FFBB53 (job color)
+    +   " 6A" + FILL_H.toHex(1)                // push FILL_H (8)
+    +   " FF 35" + gFillW.toHex(4)             // push [gFillW] w
+    +   " 6A" + FILL_Y.toHex(1)                // push FILL_Y (5)
+    +   " FF 35" + gCenterX.toHex(4)           // push [gCenterX] (x = centerX)  GROWS RIGHT
+    +   CALL(Filler(3));                       // fillrect
+
+    // -- JOB value + 3-decimal % text (outlined) ; "MAX" when level maxed --
+    // job cur [0x15fb9e8] total [0x15fb9e0] ; text x = screenW/2 + RESERVE + 4 (computed), y=2
+    // Split into pJobTextMain (ends with JMP _jobTextDone) and pJobMax (_maxJ block).
+    const pJobTextMain =
+    // guard total==0 -> MAX
+        " A1 E0 B9 5F 01"                      // mov eax,[0x15fb9e0] total.lo
+    +   " 0B 05 E4 B9 5F 01"                   // or  eax,[0x15fb9e4] total.hi
+    +   JE(Filler(52))                         // jz _maxJ
+    // scaled = cur*100000/total  (x87) -> [gScaled]
+    +   " DF 2D E0 B9 5F 01"                   // fild qword[0x15fb9e0] total
+    +   " DF 2D E8 B9 5F 01"                   // fild qword[0x15fb9e8] cur
+    +   " DE F1"                            // fdivrp st1,st0 -> ratio
+    +   " DA 0D" + c100000.toHex(4)            // fimul dword[c100000]
+    +   " DB 1D" + gScaled.toHex(4)            // fistp dword[gScaled]
+    // split scaled into int (eax) and frac (edx)
+    +   " 33 D2"                               // xor edx,edx
+    +   " A1" + gScaled.toHex(4)               // mov eax,[gScaled]
+    +   " B9 E8 03 00 00"                      // mov ecx,1000
+    +   " F7 F1"                               // div ecx -> eax=int, edx=frac
+    // wsprintfA(gBufJ, gFmt, cur.lo, int, frac)
+    +   " 52"                                  // push edx (frac)
+    +   " 50"                                  // push eax (int)
+    +   " FF 35 E8 B9 5F 01"                   // push dword[0x15fb9e8] (cur.lo)
+    +   " 68" + gFmt.toHex(4)                  // push fmt
+    +   " 68" + gBufJ.toHex(4)                 // push buf
+    +   " FF 15 2C 16 FC 00"                   // call dword[0xFC162C] wsprintfA (eax = len)
+    +   " 83 C4 14"                            // add esp,0x14
+    // JOB% LEFT-ALIGNED from (centerX + CTRGAP): textX = centerX + CTRGAP (grows right)
+    +   " 8B 0D" + gCenterX.toHex(4)           // mov ecx,[gCenterX]    (centerX)
+    +   " 83 C1" + CTRGAP.toHex(1)             // add ecx,CTRGAP        (left edge = centerX + gap)
+    +   " 89 0D" + gScaled.toHex(4)            // mov [gScaled],ecx     (stash textX)
+    // draw outlined: ecx=this ; args right-to-left, x = [gScaled]
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A 00"                               // p9
+    +   " 6A 0C"                               // p8 fontH
+    +   " 6A 00"                               // p7
+    +   " 6A 00"                               // p6 outline black
+    +   " 68" + gWhite.toHex(4)                // p5 &fill white
+    +   " 6A 00"                               // p4 len 0
+    +   " 68" + gBufJ.toHex(4)                 // p3 str
+    +   " 6A 02"                               // p2 y = 2
+    +   " FF 35" + gScaled.toHex(4)            // p1 x = [gScaled] (centered)
+    +   CALL(Filler(4))                        // call 0xa25fc0
+    +   JMP(Filler(53));                       // jmp _jobTextDone
+
+    const pJobMax =
+    // _maxJ (52): "MAX" LEFT-ALIGNED from (centerX + CTRGAP)
+        " 8B 0D" + gCenterX.toHex(4)           // mov ecx,[gCenterX]
+    +   " 83 C1" + CTRGAP.toHex(1)             // add ecx,CTRGAP        (left edge = centerX + gap)
+    +   " 89 0D" + gScaled.toHex(4)            // mov [gScaled],ecx
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A 00"                               // p9
+    +   " 6A 0C"                               // p8 fontH
+    +   " 6A 00"                               // p7
+    +   " 6A 00"                               // p6 outline black
+    +   " 68" + gWhite.toHex(4)                // p5 &fill white
+    +   " 6A 00"                               // p4 len 0
+    +   " 68" + gMax.toHex(4)                  // p3 "MAX"
+    +   " 6A 02"                               // p2 y = 2
+    +   " FF 35" + gScaled.toHex(4)            // p1 x = [gScaled]
+    +   CALL(Filler(4));                       // call 0xa25fc0
+    // _jobTextDone (53): fall through to the badge draws
+    const pJobText = pJobTextMain + pJobMax;
+
+    // -- badges DRAWN LAST (on top of fills+text) --
+    //   bg_base.bmp @ [gInnerB] (centerX-58 .. centerX) ; bg_job.bmp @ [gCenterX] (centerX .. centerX+58).
+    //   They overlay exactly where the two fills MEET at centerX. Guarded on img!=0;
+    //   a null img jumps straight to the popad/ret tail (labels 44/45 -> _ptail).
+    const pBadgeB = blitBadge(pPathB, gInnerB, 44);   // _skipBadgeB (44) -> _ptail
+    const pBadgeJ = blitBadge(pPathJ, gCenterX, 45);  // _skipBadgeJ (45) -> _ptail (job badge at centerX, adjacent to base, equal size)
+
+    // -- tail: popad / ret -- (label _ptail = the popad; badge null-guards jump here)
+    const pTail =
+        " 61"                                  // popad
+    +   " C3";                                 // ret
+
+    // -- VERTICAL SEGMENT lines: VSEG(5) dark dividers per side, evenly spaced on the fills --
+    //   base: from centerX leftward (step=gSecW/(VSEG+1)); job: rightward (step=gSecWJ/(VSEG+1)).
+    //   Drawn AFTER the fills (on top) so they show as segment dividers on the orange/blue.
+    //   ebx = x cursor (callee-saved across fillrect); esi = counter; loop via hardcoded jnz rel8.
+    const vline =                              // draw a 1px-wide divider at x=ebx, RGB #3d3d67
+        " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 68 3D 3D 67 00"                       // push COLORREF for #3d3d67 (R=3d,G=3d,B=67) -- NOTE the space after 68
+    +   " 6A" + FILL_H.toHex(1)                 // push h
+    +   " 6A 01"                                // push w = 1
+    +   " 6A" + FILL_Y.toHex(1)                 // push y
+    +   " 53"                                   // push ebx (x)
+    +   CALL(Filler(3));                        // fillrect  (preserves ebx,esi)
+    const pVLines =
+    // base: step = gSecW / (VSEG+1)
+        " A1" + gSecW.toHex(4)                  // mov eax,[gSecW]
+    +   " 33 D2"                                // xor edx,edx
+    +   " B9 0A 00 00 00"                       // mov ecx,10  (VSEG+1)
+    +   " F7 F1"                                // div ecx -> eax = step
+    +   " A3" + gStep.toHex(4)                  // mov [gStep],eax
+    +   " 8B 1D" + gCenterX.toHex(4)            // mov ebx,[gCenterX]  (x cursor)
+    +   " BE 09 00 00 00"                       // mov esi,9  (VSEG)
+    +   " 2B 1D" + gStep.toHex(4)               // _loopB: sub ebx,[gStep]
+    +   vline
+    +   " 4E"                                   // dec esi
+    +   " 75 E0"                                // jnz _loopB  (rel8 -32)
+    // job: step = gSecWJ / (VSEG+1)
+    +   " A1" + gSecWJ.toHex(4)                 // mov eax,[gSecWJ]
+    +   " 33 D2"                                // xor edx,edx
+    +   " B9 0A 00 00 00"                       // mov ecx,10  (VSEG+1)
+    +   " F7 F1"                                // div ecx -> eax = step
+    +   " A3" + gStep.toHex(4)                  // mov [gStep],eax
+    +   " 8B 1D" + gCenterX.toHex(4)            // mov ebx,[gCenterX]
+    +   " BE 09 00 00 00"                       // mov esi,9
+    +   " 03 1D" + gStep.toHex(4)               // _loopJ: add ebx,[gStep]
+    +   vline
+    +   " 4E"                                   // dec esi
+    +   " 75 E0";                               // jnz _loopJ  (rel8 -32)
+
+    const segPaint = pBegin + pBaseZero + pBaseFill + pBaseText
+                   + pJobGuard + pJobZero + pJobFill + pJobText
+                   + pVLines + pBadgeB + pBadgeJ + pTail;
+
+    // intra-paint label offsets (relative to start of segPaint), resolved later.
+    // Layout order: pBegin | pBaseZero | pBaseFill | pBaseTextMain | pBaseMax
+    //             | pJobGuard | pJobZero | pJobFill | pJobTextMain | pJobMax
+    //             | pBadgeB | pBadgeJ | pTail
+    const offBaseZero = pBegin.byteCount();                                   // _baseZero (40)
+    const offBaseDraw = offBaseZero + pBaseZero.byteCount();                  // _baseDraw (41)
+    const offBaseText = offBaseDraw + pBaseFill.byteCount();                  // start of pBaseTextMain
+    const offMaxB     = offBaseText + pBaseTextMain.byteCount();              // _maxB (50)
+    const offBaseDone = offMaxB + pBaseMax.byteCount();                       // _baseTextDone (51) = start of pJobGuard
+    const offJobZero  = offBaseDone + pJobGuard.byteCount();                  // _jobZero  (42)
+    const offJobDraw  = offJobZero + pJobZero.byteCount();                    // _jobDraw  (43)
+    const offJobText  = offJobDraw + pJobFill.byteCount();                    // start of pJobTextMain
+    const offMaxJ     = offJobText + pJobTextMain.byteCount();                // _maxJ (52)
+    const offJobDone  = offMaxJ + pJobMax.byteCount();                        // _jobTextDone (53) = start of pVLines (falls through to badges)
+    // pVLines (vertical segment dividers) draw before the badges; both null-guards (44/45) jump to _ptail
+    const offPtail    = offJobDone + pVLines.byteCount() + pBadgeB.byteCount() + pBadgeJ.byteCount(); // _ptail (popad)
+
+    //--- 4. the create cave (runs once on map entry) -------------------------------
+    $$(_, 6, `Build the create cave`)
+    const segCreate =
+        " 60"                                  // pushad
+    // GUARD: create EXACTLY ONCE. The hook site (FUN_00c6b870) runs repeatedly during map load;
+    // without this each call leaks a new window+surface+OnCreate children -> bad_alloc. If [gWnd]
+    // is already set, skip straight to the popad/stolen-replay.
+    +   " A1" + gWnd.toHex(4)                  // mov eax,[gWnd]
+    +   " 85 C0"                               // test eax,eax
+    +   " 0F 85 00 00 00 00"                   // jnz _skip (window exists) -- rel32 set by SetInt32 below
+    +   " 83 3D F0 B9 5F 01 00"                // cmp dword[0x015FB9F0], 0  (base level)
+    +   JE(Filler(20))                          // je _skip: no character loaded (login BG map) -> don't create
+    +   " 68 18 01 00 00"                      // push 0x118
+    +   CALL(Filler(10))                       // call operator new 0xdbbc4f
+    +   " 83 C4 04"                            // add esp,4
+    +   " 85 C0"                               // test eax,eax
+    +   JE(Filler(20))                         // jz _skip
+    +   " A3" + gWnd.toHex(4)                  // mov [gWnd],eax
+    +   " 8B C8"                               // mov ecx,eax
+    +   " 6A 00"                               // push 0
+    +   CALL(Filler(11))                       // call base ctor 0x86b950 (ret 4)
+    +   " A1" + gWnd.toHex(4)                  // mov eax,[gWnd]
+    +   " C7 00" + vtVir.toHex(4)              // mov dword[eax], ourVtable
+    // setSize(w=[mgr+0x47c], h=BAR_H)
+    +   " B9 E8 F4 31 01"                      // mov ecx,0x131F4E8
+    +   " 8B 91 7C 04 00 00"                   // mov edx,[ecx+0x47c]  (screenW)
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 6A" + BAR_H.toHex(1)                 // push BAR_H  (h)
+    +   " 52"                                  // push edx    (w)
+    +   CALL(Filler(12))                       // call setSize 0xa1cb70 (ret 8)
+    // Move(0, [mgr+0x480]-BAR_H)
+    +   " B9 E8 F4 31 01"                      // mov ecx,0x131F4E8
+    +   " 8B 91 80 04 00 00"                   // mov edx,[ecx+0x480]  (screenH)
+    +   " 83 EA" + BAR_H.toHex(1)              // sub edx,BAR_H
+    +   " 8B 0D" + gWnd.toHex(4)               // mov ecx,[gWnd]
+    +   " 52"                                  // push edx    (y)
+    +   " 6A 00"                               // push 0      (x)
+    +   CALL(Filler(13))                       // call Move 0x874af0 (ret 8)
+    // register mgmt list [mgr+0x17c]
+    +   " FF 35" + gWnd.toHex(4)               // push dword[gWnd]
+    +   " B9 E8 F4 31 01"                      // mov ecx,0x131F4E8
+    +   CALL(Filler(14))                       // call 0xa2d220 (ret 4)
+    // register draw list [mgr+0x500]
+    +   " FF 35" + gWnd.toHex(4)               // push dword[gWnd]
+    +   " B9 24 E4 1F 01"                      // mov ecx,0x11fe424
+    +   CALL(Filler(15))                       // call 0x7a83f0 (ret 4)
+    +   " 61"                                  // _skip: popad   (Filler 20 -> here)
+    +   stolen                                 // replay: push 1; push 0x43; mov ecx,0x131F4E8
+    +   JMP(Filler(21));                       // jmp resumeV (0xc6bb4e)
+
+    //--- 4b. the scalar-deleting destructor override (vtable +0x00) ---------------
+    // Our window is destroyed on map-leave/logout. The base scalar-deleting dtor
+    // 0x86e240 is __thiscall (ecx=this), takes a flag at [esp+4], ends `ret 4`.
+    // We must NULL [gWnd] before teardown so the per-frame hook's `jz skip` guard
+    // fires (no painting freed memory). ecx + the whole stack frame ([esp+4]=flag,
+    // return addr) are left untouched, so jmp'ing into 0x86e240 runs it verbatim
+    // (it resets [this]=base vtable, frees if flag&1, then ret 4 to our caller).
+    $$(_, 7, `Build the dtor override (zero [gWnd] then tail-jmp base dtor 0x86e240)`)
+    const segDtor =
+        " C7 05" + gWnd.toHex(4) + " 00 00 00 00"  // mov dword[gWnd], 0
+    +   JMP(Filler(60));                            // jmp 0x86e240 (base scalar-deleting dtor)
+
+    //--- 4c. the per-frame paint hook (detour UI-manager Draw 0xa48fd0) -----------
+    // 0xa48fd0 = UI window-manager Draw (__thiscall ecx=mgr). It runs exactly once
+    // per frame from the main scene render (callers 0xc739da / 0xc74fd6) and walks
+    // [mgr+0x4f0b8] then [mgr+0x17c] compositing each window's +0xa4 Draw. We detour
+    // its prologue, call our paint BEFORE it composites, so the freshly painted
+    // surface is blitted the same frame. [gWnd] guard makes it a no-op when our
+    // window doesn't exist (char-select / after the dtor NULLs it).
+    $$(_, 8, `Build the per-frame paint hook (detour 0xa48fd0)`)
+    const frameStolen = Exe.GetHex(Exe.Vir2Phy(0x00a48fd0), 6); // 55 8B EC 83 EC 28
+    // NOTE: hardcoded `jz +7` (over `mov ecx,eax`[2] + `call`[5] = 7 bytes -> the popad) instead of a
+    // computed Filler offset. When gWnd==0 (window destroyed mid-transition) the jump MUST land exactly
+    // on the popad; a stray computed offset here lands mid-instruction -> garbage -> crash.
+    const segFrame =
+        " 60"                                  // pushad
+    +   " A1" + gWnd.toHex(4)                   // mov eax,[gWnd]
+    +   " 85 C0"                                // test eax,eax
+    +   " 74 07"                                // jz _fskip (+7: skip mov ecx,eax + call paintV)
+    +   " 8B C8"                                // mov ecx,eax  (this)
+    +   CALL(Filler(81))                        // call paintV (preserves regs via its own pushad/popad)
+    +   " 61"                                   // _fskip: popad
+    +   frameStolen                             // stolen prologue: push ebp; mov ebp,esp; sub esp,0x28
+    +   " E9 00 00 00 00";                      // jmp 0xa48fd6 (resume) -- rel32 filled by SetInt32 below
+                                                //   (NOT a Filler: frameStolen bytes collide w/ the
+                                                //    placeholder -> SetFillTargets mis-resolves by +6)
+
+    const segNoMove = " C2 08 00";
+
+    //--- 5. lay caves out in one allocation ---------------------------------------
+    $$(_, 9, `Allocate caves`)
+    const offMsg    = 0;
+    const offPaint  = segMsg.byteCount();
+    const offCreate = offPaint + segPaint.byteCount();
+    const offDtor   = offCreate + segCreate.byteCount();
+    const offFrame  = offDtor + segDtor.byteCount();
+    const offNoMove = offFrame + segFrame.byteCount();
+    const blob = segMsg + segPaint + segCreate + segDtor + segFrame + segNoMove;
+    const [blobP, blobV] = Exe.Allocate(blob.byteCount());
+
+    const msgV    = blobV + offMsg;
+    const paintV  = blobV + offPaint;
+    const createV = blobV + offCreate;
+    const dtorV   = blobV + offDtor;    // our scalar-deleting dtor override (vtable +0x00)
+    const frameV  = blobV + offFrame;   // per-frame paint hook (target of 0xa48fd0 detour)
+    const noMoveV = blobV + offNoMove;
+
+    // _skip label = the popad at end of segCreate (just before stolen replay)
+    const skipOff = offCreate + segCreate.byteCount()
+                  - stolen.byteCount() - JMP(Filler(21)).byteCount() - 1; // the "61" popad
+
+    Exe.SetHex(blobP, SetFillTargets(blob, {
+        start : blobV,
+        1  : blobV + offMsg + offFwd,  // _fwd
+        3  : 0x00a1d460,            // fillrect
+        4  : 0x00a25fc0,            // outlined text drawer (ret 0x24)
+        // badge image-cache + blit
+        16 : 0x00a90350,            // get image-cache mgr (-> eax)
+        17 : 0x00a8d4a0,            // image lookup by path (thiscall ecx=mgr, ret 4) -> eax=img*
+        18 : 0x00a1d260,            // blit img to window surface (thiscall ecx=wnd, ret 0x10)
+        10 : 0x00dbbc4f,            // operator new
+        11 : 0x0086b950,            // base ctor
+        12 : 0x00a1cb70,            // setSize
+        13 : 0x00874af0,            // Move
+        14 : 0x00a2d240,            // register mgmt
+        15 : 0x007a83f0,            // register draw
+        20 : blobV + skipOff,       // _skip (popad)
+        21 : resumeV,               // jmp back into client
+        // msg-cave -> paint (per-frame repaint)
+        80 : paintV,                // call paintV from the +0x94 handler
+        // paint-cave badge null-guards (badges drawn LAST; null img -> jump to popad/ret tail)
+        44 : paintV + offPtail,     // _skipBadgeB -> _ptail (popad/ret)
+        45 : paintV + offPtail,     // _skipBadgeJ -> _ptail (popad/ret)
+        46 : paintV + offPtail,     // _hide (auto-hide: vanilla layout OR both-maxed) -> _ptail
+        // paint-cave intra labels (base/job zero + draw)
+        40 : paintV + offBaseZero,  // _baseZero
+        41 : paintV + offBaseDraw,  // _baseDraw
+        42 : paintV + offJobZero,   // _jobZero
+        43 : paintV + offJobDraw,   // _jobDraw
+        // paint-cave text labels (base/job MAX + done)
+        50 : paintV + offMaxB,      // _maxB
+        51 : paintV + offBaseDone,  // _baseTextDone
+        52 : paintV + offMaxJ,      // _maxJ
+        53 : paintV + offJobDone,   // _jobTextDone
+        // dtor override: tail-jmp the base scalar-deleting dtor
+        60 : 0x0086e240,            // base dtor (ret 4)
+        // per-frame hook (jz _fskip is a hardcoded rel8; resume jmp filled by SetInt32 below)
+        81 : paintV,                // call paintV from the per-frame hook
+    }));
+
+    // Resume jmp at the very end of segFrame -> 0xa48fd6 (after the 6 stolen prologue bytes).
+    // Computed here (not a Filler) because frameStolen collides with the Filler placeholder.
+    const resumeJmpRel = (frameV + segFrame.byteCount() - 4);   // address of the rel32 field
+    Exe.SetInt32(Exe.Vir2Phy(resumeJmpRel), 0x00a48fd6 - (frameV + segFrame.byteCount()));
+
+    // Create-cave GUARD jnz -> _skip (the popad). Manual rel32: the Filler resolves +6 here too
+    // (placeholder collision); skipOff itself is correct, so target = blobV + skipOff (the popad).
+    const guardJneOff = (" 60" + " A1" + gWnd.toHex(4) + " 85 C0").byteCount(); // jnz is at this offset in segCreate
+    Exe.SetInt32(Exe.Vir2Phy(createV + guardJneOff + 2), (blobV + skipOff) - (createV + guardJneOff + 6));
+
+    //--- 6. patch our vtable slots to the caves ------------------------------------
+    // +0x00 dtor override (NULL [gWnd] on destroy) ; +0x50 paint ; +0x94 msg.
+    $$(_, 10, `Point vtable +0x00 (dtor), +0x50 (paint), +0x94 (msg) at our caves`)
+    Exe.SetInt32(Exe.Vir2Phy(vtVir + 0x00), dtorV);
+    Exe.SetInt32(Exe.Vir2Phy(vtVir + 0x50), paintV);
+    Exe.SetInt32(Exe.Vir2Phy(vtVir + 0x64), noMoveV);
+    Exe.SetInt32(Exe.Vir2Phy(vtVir + 0x94), msgV);
+
+    //--- 7. install the create detour ---------------------------------------------
+    $$(_, 11, `Install the create detour (E9 rel32 + 4 NOP over 9 stolen bytes)`)
+    Exe.SetHex(detourP, "E9 00 00 00 00 90 90 90 90");
+    Exe.SetInt32(detourP + 1, createV - (detourV + 5));
+
+    //--- 8. install the per-frame paint hook (detour UI-mgr Draw 0xa48fd0) --------
+    // Overwrite the 6-byte prologue with E9 rel32 + 1 NOP -> our frame cave.
+    $$(_, 12, `Install the per-frame paint detour at 0xa48fd0 (E9 rel32 + NOP)`)
+    const frameP = Exe.Vir2Phy(0x00a48fd0);
+    Exe.SetHex(frameP, "E9 00 00 00 00 90");
+    Exe.SetInt32(frameP + 1, frameV - (0x00a48fd0 + 5));
+
+    return true;
+};
+
+CustomBottomExpBar.validate = function()
+{
+    return Exe.BuildDate >= 20200916
+        && Exe.FindHex("E8 FB D7 DC FF 6A 01 6A 43 B9 E8 F4 31 01") > 0   // create hook anchor
+        && Exe.FindHex("55 8B EC 6A FF 68") > 0;                          // generic VS prologue sanity
+};

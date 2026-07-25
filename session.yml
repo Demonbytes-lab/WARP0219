@@ -1,0 +1,10 @@
+from: "Inputs/Ragexe.exe"
+to: "Ragexe_patched.exe"
+patches:
+    - CallKoreaClientInfo
+    - GRFsFromIni
+    - No1and1Arg
+    - AlwaysAscii
+    - RestoreIcon
+    - HideBuildInfo
+    - SendClientFlags

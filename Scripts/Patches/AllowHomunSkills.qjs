@@ -1,0 +1,38 @@
+/**************************************************************************\
+*                                                                          *
+*   AllowHomunSkills                                                       *
+*                                                                          *
+*   Allow Homunculus AI to use all valid skills by bypassing               *
+*   client-side skill restriction checks                                   *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)            *
+*                                                                          *
+\**************************************************************************/
+
+AllowHomunSkills = function(_)
+{
+
+  const pat1 =
+    "85 C0 75 11 FF 75 ?? B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? " +
+    "85 C0 74 4D B9 ?? ?? ?? ?? E8 ?? ?? ?? ??";
+
+  let pos = Exe.FindHex(pat1);
+  if (pos < 0)
+    throw Error("AllowHomunSkills pattern1 not found");
+
+  Exe.SetHex(pos + 2, "EB");
+
+  const pat2 =
+    "85 C0 75 13 53 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? " +
+    "85 C0 0F 84 ?? ?? ?? ??";
+
+  pos = Exe.FindHex(pat2);
+  if (pos < 0)
+    throw Error("AllowHomunSkills pattern2 not found");
+
+  Exe.SetHex(pos + 2, "EB");
+
+  return true;
+};
+
+AllowHomunSkills.validate = () => Exe.BuildDate >= 2022040;

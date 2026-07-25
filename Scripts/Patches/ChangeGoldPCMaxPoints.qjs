@@ -1,0 +1,104 @@
+/**************************************************************************\
+*                                                                          *
+*   Change GoldPC Max Points                                               *
+\**************************************************************************/
+
+ChangeGoldPCMaxPoints = function(patchName)
+{
+	const _ = patchName;
+
+	const toLEHex = (num) =>
+	{
+		let hex = num.toString(16).padStart(8, '0');
+		return hex.match(/../g).reverse().join(' ');
+	};
+
+	$$(_, 1, "Ask user for new GoldPC maximum points");
+
+	let maxPoints = Exe.GetUserInput(
+		'$GoldPCMaxPoints',
+		D_Uint32,
+		"Gold PC Max Points",
+		"Enter maximum Gold PC points (default: 300, max: 99999)",
+		300,
+		{ saveDefault: true }
+	);
+
+	if (maxPoints === false)
+		Cancel("Gold PC max points unchanged");
+
+	if (maxPoints > 99999)
+	{
+		Error("Value cannot exceed 99,999.");
+		Cancel("Gold PC max points unchanged");
+	}
+
+	if (maxPoints < 0)
+	{
+		Error("Value cannot be negative.");
+		Cancel("Gold PC max points unchanged");
+	}
+
+	const newValHex = toLEHex(maxPoints);
+	const oldValHex = "2C 01 00 00";
+
+	let patched = 0;
+
+	/* -------------------------------------------------------------- */
+	$$(_, 2, "Patch #1 — PUSH 300");
+
+	const pat1 = "68 " + oldValHex + " 68 3B 0A 00 00 E8 ?? ?? ?? ??";
+	const addr1 = Exe.FindHex(pat1, CODE);
+	if (addr1 < 0) throw Error("GoldPC PUSH 300 pattern not found");
+
+	Exe.SetHex(addr1 + 1, newValHex);
+	patched++;
+
+	/* -------------------------------------------------------------- */
+	$$(_, 3, "Patch #2 — CMP [EDI+98], 300");
+
+	let pat2 = "81 BF 98 00 00 00 " + oldValHex;
+	let addr2 = Exe.FindHex(pat2, CODE);
+
+	if (addr2 < 0)
+	{
+		$$(_, 3.1, "Primary pattern failed, trying fallback pattern");
+		pat2 = "81 BF ?? ?? ?? ?? " + oldValHex + " 0F 8C ?? ?? ?? ??";
+		addr2 = Exe.FindHex(pat2, CODE);
+	}
+
+	if (addr2 < 0)
+		throw Error("GoldPC CMP [EDI+??],300 pattern not found");
+
+	Exe.SetHex(addr2 + 6, newValHex);
+	patched++;
+
+	/* -------------------------------------------------------------- */
+	$$(_, 4, "Patch #3 — CMP [ESI+98], 300");
+
+	let pat3 = "81 BE 98 00 00 00 " + oldValHex;
+	let addr3 = Exe.FindHex(pat3, CODE);
+
+	if (addr3 < 0)
+	{
+		$$(_, 4.1, "Primary pattern failed, trying fallback pattern");
+		pat3 = "81 BE ?? ?? ?? ?? " + oldValHex + " 7D 73";
+		addr3 = Exe.FindHex(pat3, CODE);
+	}
+
+	if (addr3 < 0)
+		throw Error("GoldPC CMP [ESI+??],300 pattern not found");
+
+	Exe.SetHex(addr3 + 6, newValHex);
+	patched++;
+
+	/* -------------------------------------------------------------- */
+	if (patched !== 3)
+		throw Error(`Expected to patch 3 locations, but patched ${patched}`);
+
+	$$(_, 5, "GoldPC max points successfully updated");
+
+	return true;
+};
+
+ChangeGoldPCMaxPoints.validate = () => true;

@@ -1,0 +1,17 @@
+RemovePremiumService = function(_)
+{
+	const pat = "7E 21 3B F1 7C 1D 8D 04 11 3B F0 7D 16";
+	const pos = Exe.FindHex(pat);
+
+	if (pos < 0)
+		throw Error("RemovePremiumService pattern not found");
+
+	Exe.SetHex(pos, "EB");
+
+	return true;
+};
+
+RemovePremiumService.validate = () => true;
+
+// alias
+DisablePremiumServiceText = RemovePremiumService;

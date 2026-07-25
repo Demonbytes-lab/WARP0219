@@ -1,0 +1,96 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2026 NoxaraRO                                            *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : NoxaraRO                                               *
+*   Created Date  : 2026-04-14                                             *
+*   Last Modified : 2026-04-14                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief NOP out the explicit DestroyWindow(0xE) call for the whisper/PM
+///        window inside the UIWindowMgr cleanup function (state 1), so the
+///        whisper window stays open during teleport and map transitions.
+///
+///        After the state-1 preserve loop (which iterates the window list
+///        at UIWindowMgr+0x17c and checks each window's type at offset 0x2c
+///        against a preserve whitelist), there is a hardcoded call:
+///
+///          PUSH 0Eh              ; window type = whisper (UIWhisperWnd)
+///          MOV ECX, <reg>        ; this = UIWindowMgr
+///          CALL DestroyWindow
+///
+///        This explicitly closes the whisper window every time the client
+///        transitions between maps (Fly Wing, Butterfly Wing, @go, etc).
+///        We NOP these bytes to keep the PM window alive.
+///
+KeepWhisperOnTeleport = function(_)
+{
+	$$(_, 1, `Find the preserve loop's back-edge followed by DestroyWindow(0xE)`)
+
+	/// The preserve loop ends by advancing to the next list node, comparing
+	/// against the list head, and jumping back if not finished (JNZ).
+	/// Immediately after that loop exit comes the hardcoded whisper destroy.
+	///
+	/// Pattern (all client versions observed):
+	///   MOV reg, [reg]                ; advance to next node in linked list
+	///   CMP reg, [reg + offset]       ; compare against UIWindowMgr.windowList
+	///   JNZ short _loop               ; back to loop head (negative offset)
+	///   PUSH 0Eh                      ; whisper window type
+	///   MOV ECX, reg                  ; this = UIWindowMgr
+	///   CALL DestroyWindow            ; explicitly destroy whisper window
+	///
+	/// We search for the tail: JNZ short(neg) + PUSH 0E + MOV ECX,reg + CALL rel32
+
+	/// 1.1 - Search for the byte pattern directly.
+	///       75 xx  6A 0E  8B C? E8 ?? ?? ?? ??
+	///       JNZ    PUSH   MOV ECX,EBX/ESI/EDI  CALL rel32
+	///
+	///       The JNZ offset should be negative (jumping backwards = loop).
+	///       After the CALL there should NOT be another PUSH 0xE (to avoid
+	///       matching non-cleanup contexts).
+
+	let addr = -1;
+	const regs = [EBX, ESI, EDI];
+
+	for (const reg of regs)
+	{
+		const code =
+			JNZ(WCn)        //jnz short _back (negative = loop back)
+		+	PUSH(0x0E)      //push 0Eh
+		+	MOV(ECX, reg)   //mov ecx, reg
+		+	CALL(ALLWC)     //call UIWindowMgr::DestroyWindow
+		;
+
+		addr = Exe.FindHex(code);
+		if (addr > 0)
+			break;
+	}
+
+	if (addr < 0)
+		throw Error("Whisper DestroyWindow pattern not found");
+
+	$$(_, 2, `NOP the PUSH + MOV + CALL (9 bytes, skip the 2-byte JNZ)`)
+	Exe.SetNOPs(addr + 2, 9);
+
+	return true;
+};

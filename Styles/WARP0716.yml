@@ -1,0 +1,286 @@
+############################################################################
+#                                                                          #
+#   WARP 07-16 Community Theme                                             #
+#   Modern dark theme with Ragnarok Online inspired colors                 #
+#                                                                          #
+#   Author: CrazyBebop                                                     #
+#   Created: 2026-03-13                                                    #
+#                                                                          #
+#   Portal Blue  #4FC3F7  — Kafra warp portal glow                        #
+#   Zeny Gold    #FFD54F  — loot & currency                               #
+#   Heal Green   #69F0AE  — recovery/success                              #
+#   Crimson      #FF5252  — damage/error                                  #
+#                                                                          #
+############################################################################
+
+
+#==========#
+# Settings #
+#==========#
+
+radius: 6
+
+font:
+    family: Nova Flat
+    size: 9
+    sizeBig: 12
+    sizeSmall: 8
+    editFamily: Consolas
+    editSize: 10
+
+
+#=============#
+# Image paths #
+#=============#
+
+paths:
+    githubBtn:
+        inactive: Images/WARP0716/github_i.png
+        active: Images/WARP0716/github_a.png
+
+    discordBtn:
+        inactive: Images/WARP0716/discord_i.png
+        active: Images/WARP0716/discord_a.png
+
+    donateBtn:
+        inactive: Images/WARP0716/donate_i.png
+        active: Images/WARP0716/donate_a.png
+
+    browseBtn:
+        inactive: Images/WARP0716/browse_i.png
+        active: Images/WARP0716/browse_a.png
+
+    viewBtn:
+        inactive: Images/WARP0716/viewfile_i.png
+        active: Images/WARP0716/viewfile_a.png
+
+    clearBtn:
+        inactive: Images/WARP0716/clear_i.png
+        active: Images/WARP0716/clear_a.png
+
+    prevBtn:
+        inactive: Images/WARP0716/prev_i.png
+        active: Images/WARP0716/prev_a.png
+
+    nextBtn:
+        inactive: Images/WARP0716/next_i.png
+        active: Images/WARP0716/next_a.png
+
+    settingsBtn:
+        inactive: Images/WARP0716/settings_i.png
+        active: Images/WARP0716/settings_a.png
+
+    infoBtn:
+        inactive: Images/WARP0716/info_i.png
+        active: Images/WARP0716/info_a.png
+
+    actDrawer:
+        inactive: Images/WARP0716/actns_i.png
+        active: Images/WARP0716/actns_a.png
+
+    extnDrawer:
+        inactive: Images/WARP0716/extns_i.png
+        active: Images/WARP0716/extns_a.png
+
+    sort:
+        on: Images/WARP0716/ascend.png
+        off: Images/WARP0716/descend.png
+
+    boldBtn:
+        on: Images/WARP0716/bold_on.png
+        off: Images/WARP0716/bold_off.png
+
+    italicBtn:
+        on: Images/WARP0716/italic_on.png
+        off: Images/WARP0716/italic_off.png
+
+    rexBtn:
+        on: Images/WARP0716/rex_on.png
+        off: Images/WARP0716/rex_off.png
+
+    csBtn:
+        on: Images/WARP0716/cs_on.png
+        off: Images/WARP0716/cs_off.png
+
+    switch:
+        on: Images/WARP0716/on.png
+        off: Images/WARP0716/off.png
+
+    rcmdTag:
+        inactive: Images/WARP0716/rcmd_i.png
+        selected: Images/WARP0716/rcmd_s.png
+
+    search:
+        indicator: Images/WARP0716/search.png
+
+    sizegrip:
+        indicator: Images/WARP0716/grip.png
+
+    msgHeader:
+        successBox: Images/WARP0716/success_header.png
+        queryBox: Images/WARP0716/query_header.png
+        warnBox: Images/WARP0716/warn_header.png
+        errBox: Images/WARP0716/error_header.png
+
+
+#========#
+# Colors #
+#========#
+
+colors:
+
+    #=============================================#
+    # Used globally in various sections of the UI #
+    #=============================================#
+
+    global:
+        background: '#1E2028'
+        overlay: '#C0101018'
+        border: '#3A3F4E'
+
+        # Primary — headings, toolbar text, labels, links
+        primary: '#A0DCFF'
+
+        # Secondary — toolbar/banner background (light enough for default black text)
+        secondary: '#506580'
+
+        # Accent — toolbar text, frame titles, button borders, labels
+        accent: '#4FC3F7'
+
+        # Highlight — used for header/toolbar text color
+        highlight: '#D8E4F0'
+
+        # Reject buttons
+        rejector: '#FF5252'
+
+    #==========================#
+    # Used for Drop Down menus #
+    #==========================#
+
+    dropDown:
+        background: '#252830'
+        border: '#454D60'
+
+    #===================================#
+    # Used for tabs/pages in Test Bench #
+    #===================================#
+
+    page:
+        background: '#272A32'
+        border: '#454D60'
+
+    #===============================#
+    # Used for Text Editor controls #
+    #===============================#
+
+    editor:
+        background: '#2A2D36'
+
+    #===================================================================#
+    # Override for Quick Action Frames (looks better without the lines) #
+    #===================================================================#
+
+    actionFrame:
+        border: transparent
+
+    #=========================================================#
+    # Override for Demo Text in FontNamePanel & FontSizePanel  #
+    #=========================================================#
+
+    demoText:
+        inactiveText: '#E0E8F0'
+        activeText: '#FFD54F'
+
+    #==============================================================#
+    # Override for Index prompts in VectorPanel (for D_Vec* types) #
+    #==============================================================#
+
+    idxPrompt:
+        color: '#4FC3F7'
+
+    #=============================================================#
+    # Used for the items in Patch List, Extension List & Exe List #
+    #=============================================================#
+
+    delegate:
+        text: '#B0BED0'
+        groupText: '#4FC3F7'
+        selectedText: white
+        background: '#252830'
+        selectedBG: '#2A4060'
+        menuText: '#4FC3F7'
+
+    #=============================#
+    # Used for Dialog Box Buttons #
+    #=============================#
+
+    dialog:
+        acceptor: '#4FC3F7'
+        rejector: '#FF5252'
+
+    #=============================#
+    # Used for Message Box frames #
+    #=============================#
+
+    errBox:
+        border: '#FF5252'
+
+    warnBox:
+        border: '#FFB74D'
+
+    successBox:
+        border: '#4FC3F7'
+
+    queryBox:
+        border: '#69F0AE'
+
+    aboutBox:
+        border: '#4FC3F7'
+
+    settingsBox:
+        border: '#4FC3F7'
+        headerText: white
+
+    #====================================================#
+    # Used for pattern matches with Finder in Test Bench #
+    #====================================================#
+
+    matches:
+        background: '#2A4060'
+        text: '#E8F0F8'
+        currentBG: '#4FC3F7'
+        currentText: '#0D0F12'
+
+    #===========================================#
+    # Used for Test & Script Evaluation results #
+    #===========================================#
+
+    outputView:
+        success: '#69F0AE'
+        info: '#4FC3F7'
+        error: '#FF5252'
+        warn: '#FFB74D'
+
+        patInfo: '#4FC3F7'
+        extnInfo: '#4FC3F7'
+        exeInfo: '#CE93D8'
+        patIgnored: '#90A0B0'
+        extnOutput: '#CE93D8'
+        userInterrupt: '#FF80AB'
+
+    #============================================#
+    # Used by Syntax Assistant for Script Editor #
+    #============================================#
+
+    syntax:
+        comment: '#6A7A8A'
+        docComment: '#4DB6AC'
+        number: '#FFB74D'
+        string: '#69F0AE'
+        escSequence: '#FF80AB'
+        regexp: '#CE93D8'
+        operator: '#4FC3F7'
+        keyword: '#64B5F6'
+        globVal: '#FFD54F'
+        member: '#F48FB1'
+        invalid: '#FF5252'

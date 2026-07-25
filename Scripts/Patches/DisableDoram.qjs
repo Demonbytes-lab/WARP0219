@@ -1,0 +1,77 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2023 Ai4rei/AN                                         *
+*   Copyright (C) 2013-2023 Neo-Mind                                       *
+*   Copyright (C) 2017-2023 Andrei Karas (4144)                            *
+*   Copyright (C) 2017-2023 Jchcc                                          *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Ai4rei/AN, Neo-Mind, Andrei (4144), Jchcc              *
+*   Created Date  : 2020-11-10                                             *
+*   Last Modified : 2023-08-26                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+DisableDoram = function ()
+{
+    const _ = "DisableDoram : ";
+
+    $$(_ + "Searching Doram ON/OFF BMP strings...");
+
+    const doramOff = Exe.FindText(
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\make_character_ver2\\img_doram_off.bmp"
+    );
+
+    const doramOn = Exe.FindText(
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\make_character_ver2\\img_doram_on.bmp"
+    );
+
+    if (doramOff < 0 || doramOn < 0)
+        throw Error("CANNOT FIND img_doram_off.bmp / img_doram_on.bmp");
+
+    $$(_ + "Found Doram BMP strings OK");
+
+    const doramOffEnd = doramOff + 0x34;
+    const doramOnEnd  = doramOn  + 0x33;
+
+    const offList = Exe.FindHexN("B8 " + doramOff.toHex());
+    const onList  = Exe.FindHexN("BF " + doramOn.toHex());
+
+    if (offList.length === 0) throw Error("mov eax, doram_off not found");
+    if (onList.length  === 0) throw Error("mov edi, doram_on not found");
+
+    for (const p of offList) Exe.SetUint32(p + 1, doramOffEnd);
+    for (const p of onList)  Exe.SetUint32(p + 1, doramOnEnd);
+
+    $$(_ + "DisableDoram patch completed.");
+    return true;
+};
+
+DisableDoram.validate = function ()
+{
+    const doramOff = Exe.FindText(
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\make_character_ver2\\img_doram_off.bmp"
+    );
+    const doramOn = Exe.FindText(
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\make_character_ver2\\img_doram_on.bmp"
+    );
+    return (doramOff > 0 && doramOn > 0);
+};

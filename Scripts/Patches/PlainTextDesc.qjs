@@ -1,0 +1,123 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) ?-2015 Shinryo                                           *
+*   Copyright (C) 2013-2024 Neo Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Shinryo, Neo-Mind                                      *
+*   Created Date  : 2020-11-12                                             *
+*   Last Modified : 2024-09-27                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Change conditional jump to JMP after Langtype comparison inside DataTxtDecode function
+///
+PlainTextDesc = function(_)
+{
+	$$(_, 1, `Ensure the LANGTYPE is loaded`)
+	LANGTYPE.load();
+
+	$$(_, 2, `Find the Langtype comparison in DataTxtDecode function`)
+	let prefix, suffix;
+	if (Exe.Version === 6)//VC6
+	{
+		prefix =
+			MOV(EAX, [LANGTYPE])       //mov eax, dword ptr [g_serviceType]
+		+	PUSH(ESI)                  //push esi
+		+	TEST(EAX, EAX)             //test eax, eax
+		+	PUSH(EDI)                  //push edi
+		;
+		suffix =
+			JNZ(WCp)                   //jnz short _skip
+		;
+	}
+	else
+	{
+		prefix =
+			CMP([LANGTYPE], 0)         //cmp dword ptr [g_serviceType], 0
+		;
+
+		switch (Exe.Version)
+		{
+			case 9:  //VC9 &
+			case 10: //VC14
+			{
+				suffix =
+					JNZ(WCp)           //jnz short _skip
+				+	PUSH(ESI)          //push esi
+				+	PUSH(EDI)          //push edi
+				;
+				break;
+			}
+
+			case 11: //VC11
+			{
+				suffix =
+					JNZ(WCp)           //jnz short _skip
+				+	PUSH(EDI)          //push edi
+				;
+				break;
+			}
+
+			default: //VC14.16
+			{
+				suffix =
+					JNZ(WCp)           //jnz short _skip
+				+	MOV(R32, [EBP, 8]) //mov regA, dword ptr [ebp+8] ; ARG.1
+				+	PUSH(ESI)          //push esi
+				;
+				break;
+			}
+		}
+	}
+	
+	let addr = Exe.FindHex(prefix + suffix);
+	let done = false;
+	if (addr < 0 && Exe.Version !== 6)
+	{
+		$$(_, '2.1', `2026-02-19 client (BuildDate 20260211) - two things changed at this site:
+		              (a) DataTxtDecode is unchanged in shape but the supplied base already has its JNZ
+		                  flipped to an unconditional JMP (same displacement), i.e. the patch is in effect,
+		              (b) the comparison must not be tied to [LANGTYPE] - wildcard the global instead so
+		                  this still resolves when g_serviceType cannot be identified.
+		              Both alternatives are only tried after the original pattern above has failed`)
+		const altPrefix = CMP([POS4WC], 0); //cmp dword ptr [g_serviceType], 0
+
+		addr = Exe.FindHex(altPrefix + suffix);
+		if (addr < 0)
+		{
+			addr = Exe.FindHex(altPrefix + suffix.replace(JNZ(WCp), JMP(WCp)));
+			done = (addr > 0);
+		}
+		if (addr > 0)
+			prefix = altPrefix;
+	}
+	if (addr < 0)
+		throw Error("Langtype comparison missing");
+
+	if (!done)
+	{
+		$$(_, 3, `Change the conditional jump`)
+		Exe.SetJMP(addr + prefix.byteCount());
+	}
+
+	return true;
+};

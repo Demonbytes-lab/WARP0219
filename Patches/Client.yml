@@ -1,0 +1,327 @@
+############################################################################
+#                                                                          #
+#   Copyright (C) ?-2023 *Various authors*                                 #
+#                                                                          #
+#   This file is a part of WARP project (specific to RO clients)           #
+#                                                                          #
+#   WARP is free software: you can redistribute it and/or modify           #
+#   it under the terms of the GNU General Public License as published by   #
+#   the Free Software Foundation, either version 3 of the License, or      #
+#   (at your option) any later version.                                    #
+#                                                                          #
+#   This program is distributed in the hope that it will be useful,        #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of         #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          #
+#   GNU General Public License for more details.                           #
+#                                                                          #
+#   You should have received a copy of the GNU General Public License      #
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.  #
+#                                                                          #
+#                                                                          #
+############################################################################
+#                                                                          #
+#   Author(s)     : Neo-Mind                                               #
+#   Created Date  : 2020-08-26                                             #
+#   Last Modified : 2022-09-30                                             #
+#                                                                          #
+############################################################################
+
+ResizeHealthBar:
+    title : RESIZE HP BAR
+    mutex : false
+    
+    patches:
+        - ResizePlayerBar:
+            title : Resize Player HP/SP bar
+            recommend : no
+            author : CH.C (jchcc) , Neo-Mind
+            desc : Changes the width of your own character's HP and SP bars to a custom size. Useful for making health bars easier to read at a glance.
+        
+        - ResizeNormalBar:
+            title : Resize Normal mob HP bar
+            recommend : no
+            author : CH.C (jchcc) , Neo-Mind
+            desc : Changes the width of the HP bar displayed above regular monsters to a custom size.
+        
+        - ResizeMiniBossBar:
+            title : Resize Mini-Boss mob HP bar
+            recommend : no
+            author : CH.C (jchcc) , Neo-Mind
+            desc : Changes the width of the HP bar displayed above Mini-Boss monsters to a custom size. Helpful for distinguishing Mini-Bosses from regular mobs.
+        
+        - ResizeBossBar:
+            title : Resize Boss mob HP bar
+            recommend : no
+            author : CH.C (jchcc) , Neo-Mind
+            desc : Changes the width of the HP bar displayed above Boss (MVP) monsters to a custom size. Helpful for distinguishing Bosses from regular mobs.
+
+        - AllianceChatHotkeySelector:
+            title : Alliance Chat Hotkey Selector
+            recommend : no
+            author : AcidMarco,Skylove
+            desc : Allows you to choose a custom symbol to trigger Alliance Chat instead of the default '#'. This is useful to avoid conflicts with GM command symbols such as @ or !.
+
+DisableEffect:
+    title : DISABLE EFFECT
+    mutex : false
+    
+    patches:
+        - NoEarthQuake:
+            title : Disable Quake skill effect
+            recommend : no
+            author : Ai4rei/AN , CrazyBebop
+            desc : Disables the screen-shaking Earthquake skill effect. Prevents motion sickness and visual discomfort caused by this skill.
+        
+        - NoBlindness:
+            title : Disable Blind skills effect
+            recommend : no
+            author : X-EcutiOnner
+            desc : Disables the Blind status effect that darkens the entire screen. Prevents the disorienting black-screen visual when blinded.
+
+        - RestoreSongsEffect:
+            title : Restore Bard/Dancer Song Effects (Old Song Patch)
+            recommend : no
+            author : CH.C (jchcc)
+            desc : Restores the visual ground effects for Bard and Dancer song skills. Otherwise known as the Restore Old Song patch. These effects were removed in newer clients but this patch reconstructs them using LandProtector's rendering code.
+
+EnableSlashCmd:
+    title : SLASH COMMANDS
+    mutex : false
+    
+    patches:
+        - EnableWho:
+            title : Always enable '/who' command
+            recommend : yes
+            author : Neo-Mind
+            desc : Enables the <b>/w</b> and <b>/who</b> commands on all langtypes to show the current number of online players. Normally restricted to certain service regions.
+        
+        - EnableShowName:
+            title : Always enable '/showname' command
+            recommend : yes
+            author : Neo-Mind
+            desc : Enables the <b>/showname</b> command on all langtypes, allowing players to toggle the display of character names, party names, and guild names above sprites.
+        
+        - EnableUnknCmds:
+            title : Allow unknown '/command's [Experimental]
+            recommend : no
+            author : Ai4rei/AN
+            desc : Sends unrecognized '<b>/command</b>' inputs to the server instead of showing "Invalid command". Allows server-side slash commands (like custom scripts) to work through the chat box.
+
+NoSkillChatter:
+    title : SKILL CHATTER REMOVAL
+    mutex : false
+    
+    patches:
+        - NoDancerScream:
+            title : Remove Dancer's Scream chatter
+            recommend : no
+            author : Neo-Mind
+            desc : Removes the random chat messages that appear when the Dancer's Scream skill is used (loaded from dc_scream.txt). Reduces chat spam in busy areas.
+        
+        - NoBardFrostJoke:
+            title : Remove Bard's Frost Joke chatter
+            recommend : no
+            author : Neo-Mind
+            desc : Removes the random chat messages that appear when the Bard's Frost Joke skill is used (loaded from ba_frostjoke.txt). Reduces chat spam in busy areas.
+
+ResizeBox:
+    title : RESIZE BOX
+    mutex : false
+    
+    patches:
+        - ResizeChatBox:
+            title : Resize Chat Box
+            recommend : no
+            author : Shinryo
+            desc : Increases the character limit in the Main/Battle chat input box from <b>70</b> to a custom value. Most servers use 234 to allow longer messages.
+        
+        - ResizeChatRoomBox:
+            title : Resize Chat Room Box
+            recommend : no
+            author : Shinryo
+            desc : Increases the character limit in chat room input boxes from <b>70</b> to a custom value. Most servers use 234 to allow longer messages.
+        
+        - ResizePMBox:
+            title : Resize PM Box
+            recommend : no
+            author : Shinryo
+            desc : Increases the character limit in the PM (whisper) input box from <b>70</b> to a custom value. Most servers use 234 to allow longer private messages.
+        
+        - ResizeNpcBox:
+            title : Resize NPC Dialog Box
+            recommend : no
+            author : Ai4rei/AN
+            desc : Increases the maximum character limit for NPC dialog input fields to a custom value (between 2052 and 4096). Useful for servers with NPCs that accept longer text input.
+
+RouletteVis:
+    title : ROULETTE VISIBILITY
+    mutex : true
+    color : darkorange
+    
+    patches:
+        - HideRoulette:
+            title : Hide Roulette icon
+            recommend : no
+            author : Neo-Mind
+            desc : Hides the Roulette icon from the game interface. Useful for servers that do not use Gravity's Roulette system.
+        
+        - ShowRoulette:
+            title : Show Roulette icon
+            recommend : no
+            author : Neo-Mind
+            desc : Restores the Roulette icon that Gravity removed in newer clients. Use this if your server has Roulette functionality enabled.
+
+CashShop:
+    title : CASH SHOP CUSTOMIZATION
+    mutex : false
+    
+    patches:
+        - MoveShopIcon:
+            title : Move Cash Shop icon
+            recommend : no
+            author : Neo-Mind
+            desc : Repositions the Cash Shop icon to custom screen coordinates. Positive values offset from the top-left corner; negative values offset from the bottom-right corner.
+        
+        - ZeroCinShop:
+            title : Enforce 0 C in Cash Shop
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Forces the <b>C</b> (cash point) field to display 0 instead of random garbage values in the Cash Shop. Fixes a display bug on servers that do not use Gravity's cash point system.
+        
+        - DefShopBrowser:
+            title : Use default web browser in Cash Shop
+            recommend : no
+            author : CH.C (jchcc)
+            desc : Opens Cash Shop URLs in your default web browser instead of the hardcoded Internet Explorer. Essential since IE is deprecated on modern Windows.
+
+EquipPreview:
+    title : SHOP EQ PREVIEW
+    mutex : false
+    
+    patches:
+        - PreviewInShop:
+            title : Enable equipment preview in Cash Shop
+            recommend : no
+            author : Andrei Karas (4144) , Neo-Mind,Skylove
+            desc: Adds an equipment preview button in the Cash Shop (right-click items to see it). Lets players see how gear looks before buying. Requires server-side support to be enabled as well.
+        
+        - PreviewInTrader:
+            title : Enable equipment preview in Trader Shop
+            recommend : no
+            author : Andrei Karas (4144) , Neo-Mind
+            desc: Adds an equipment preview button in the older-style Trader Shop (right-click items to see it). Requires server-side support to be enabled as well.
+
+        - HideCashShop:
+            title : Hide Cash Shop icon
+            recommend : no
+            author : Neo-Mind
+            desc : Hides the Cash Shop icon from the game interface. Useful for servers that do not use a Cash Shop or want a cleaner UI.
+
+IncrCamAngle:
+    title : CAMERA ANGLES
+    mutex : true
+    
+    patches:
+        - LowCamAngle:
+            title : Increase Camera Angles (LOW)
+            recommend : no
+            author : Shinryo , CrazyBebop
+            desc : Expands the allowed camera tilt range to about <b>30 degrees</b>, letting you angle the view slightly lower than default. A subtle improvement for general gameplay.
+        
+        - MediumCamAngle:
+            title : Increase Camera Angles (MEDIUM)
+            recommend : yes
+            author : Shinryo , CrazyBebop
+            desc : Expands the allowed camera tilt range to about <b>42 degrees</b>, providing a good balance between visibility and immersion. Recommended for most players.
+        
+        - HighCamAngle:
+            title : Increase Camera Angles (HIGH)
+            recommend : no
+            author : Shinryo , CrazyBebop
+            desc : Expands the allowed camera tilt range to about <b>65 degrees</b>, enabling a near ground-level view. Great for screenshots, but may cause visual glitches on some maps.
+
+IncrZoom:
+    title : ZOOM OUT
+    mutex : true
+
+    patches:
+        - Zoom25Percent:
+            title : Decrease Zoom Out (to 25%)
+            recommend : no
+            author : Shinryo , Andrei Karas (4144)
+            desc : Restricts the zoom-out range to about 25% of the maximum, bringing the camera closer than default. For a more zoomed-in gameplay experience.
+        
+        - Zoom50Percent:
+            title : Increase Zoom Out (to 50%)
+            recommend : no
+            author : Shinryo , Andrei Karas (4144)
+            desc : Extends the zoom-out range to about 50% of the maximum, letting you see more of the map around your character.
+        
+        - Zoom75Percent:
+            title : Increase Zoom Out (to 75%)
+            recommend : no
+            author : Shinryo , Andrei Karas (4144) , Functor
+            desc : Extends the zoom-out range to about 75% of the maximum. Provides a wide field of view useful for WoE, PvP, and large-scale fights.
+        
+        - ZoomMax:
+            title : Increase Zoom Out (to Max)
+            recommend : no
+            author : Shinryo , Andrei Karas (4144)
+            desc : Unlocks the full zoom-out range, allowing the camera to pull back as far as possible. Maximum visibility, but sprites may appear very small.
+
+LoginMode:
+    title : LOGIN MODE
+    mutex : true
+    
+    patches:
+        - RestoreLoginWindow:
+            title : Restore Login Window
+            recommend : no
+            author : Shinryo , Neo-Mind
+            desc : Bypasses Gravity's token-based login system and restores the classic username/password login window. Required for most servers that do not use a web-based launcher.
+        
+        - UseSSOLogin:
+            title : Use SSO Login Packet
+            recommend : no
+            author : Ai4rei/AN
+            desc : Forces all langtypes to use the SSO login packet (0x825) instead of the old login packet (0x64). Required when using a patcher/launcher that passes credentials via command-line token. <b>WARNING:</b> Incompatible with 'Disable Login password encryption' (NoPassEncr).
+        
+        - UseOldLogin:
+            title : Use Old Login Packet
+            recommend : yes
+            author : Ai4rei/AN , Andrei Karas (4144)
+            desc : Forces the client to use the old login packet (0x64) for authentication. Required for newer clients where 'Restore Login Window' no longer works. The standard choice for most servers with direct username/password login.
+
+ChatRepeat:
+    title : CHAT REPEAT
+    mutex : true
+    
+    patches:
+        - UnlimitedChatRepeat:
+            title : Allow unlimited chat repeat
+            recommend : no
+            author : Neo-Mind
+            desc : Removes the client-side limit on repeating the same chat message. By default, the client blocks you from sending the same message more than a few times in a row.
+        
+        - LimitedChatRepeat:
+            title : Customize chat repeat limit
+            recommend : no
+            author : Shinryo
+            desc : Changes the maximum number of identical consecutive chat messages allowed from the default of 2 to a custom value. Provides more control than fully removing the limit.
+
+CustomSleep:
+    title : SLEEP DELAY CUSTOMIZATION
+    mutex : false
+    
+    patches:
+        - AddInpDelay:
+            title : Add Input Delay
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Adds extra milliseconds to the client's input processing delay. Can be used to throttle input speed for testing or to reduce CPU usage on low-end machines.
+        
+        - CustomGameLoopDelay:
+            title : Customize game loop delay
+            recommend : no
+            author : Andrei Karas (4144)
+            desc : Changes the Sleep() delay in the main game loop to a custom value (in milliseconds). Lower values make the client more responsive but use more CPU; higher values save CPU at the cost of smoothness.

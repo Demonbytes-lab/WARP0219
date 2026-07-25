@@ -1,0 +1,317 @@
+/**************************************************************************\
+*                                                                          *
+*   Copyright (C) 2013-2024 Neo-Mind                                       *
+*                                                                          *
+*   This file is a part of WARP project (specific to RO clients)           *
+*                                                                          *
+*   WARP is free software: you can redistribute it and/or modify           *
+*   it under the terms of the GNU General Public License as published by   *
+*   the Free Software Foundation, either version 3 of the License, or      *
+*   (at your option) any later version.                                    *
+*                                                                          *
+*   This program is distributed in the hope that it will be useful,        *
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of         *
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the          *
+*   GNU General Public License for more details.                           *
+*                                                                          *
+*   You should have received a copy of the GNU General Public License      *
+*   along with this program.  If not, see <http://www.gnu.org/licenses/>.  *
+*                                                                          *
+*                                                                          *
+|**************************************************************************|
+*                                                                          *
+*   Author(s)     : Neo-Mind                                               *
+*   Created Date  : 2020-11-10                                             *
+*   Last Modified : 2024-08-09                                             *
+*                                                                          *
+\**************************************************************************/
+
+///
+/// \brief Skip the Langtype checks inside UILoginWnd::OnCreate and re-enables opening of the registration page.
+///        The checks are inside UILoginWnd::SendMsg. In addition to the above, patch also modifies the
+///        CModeMgr::Quit CALL to actually close the client.
+///
+ShowRegisterBtn = function(_)
+{
+	$$(_, 1.1, `Find the registration URL`)
+	let addr = Exe.FindText("http://ro.hangame.com/login/loginstep.asp?prevURL=/NHNCommon/NHN/Memberjoin.asp");
+	if (addr < 0)
+		throw Error("Registration URL not found");
+
+	$$(_, 1.2, `Find where it is PUSHed (which will be inside UILoginWnd::SendMsg)`)
+	addr = Exe.FindHex( PUSH(addr) );
+	if (addr < 0)
+		throw Error("Registration URL not PUSHed");
+
+	$$(_, 1.3, `Ensure the LANGTYPE is loaded`)
+	LANGTYPE.load();
+
+	$$(_, 2.1, `Look for the Langtype comparison before the PUSH (within 0x30 bytes)`)
+	let prefix, jnePos; //jnePos indicates position of the JNE opcode w.r.t. end of prefix
+	if (Exe.Version === 6) //VC6
+	{
+		prefix =
+			MOV(EAX, [LANGTYPE])   //mov eax, dword ptr [g_serviceType]
+		+   TEST(EAX, EAX)         //test eax, eax
+		+   JNE(POS2WC)            //jne _skip
+		;
+		jnePos = -6;
+	}
+	else //VC9 - VC11
+	{
+		prefix =
+			CMP([LANGTYPE], 0)    //cmp dword ptr [g_serviceType], 0
+		+   JNE(WCp)              //jne short _skip
+		;
+		jnePos = -2;
+	}
+
+	const suffix =
+		CMP([POS4WC], 1)          //cmp dword ptr [g_isGravityID], 1
+	+   JNE(WCp)                  //jne short _skip#2
+	;
+
+	let cmpAddr = Exe.FindHex(prefix + suffix, addr - 0x30, addr);
+	if (cmpAddr < 0)
+		throw Error("First Langtype comparison not found");
+
+	$$(_, 2.2, `Update cmpAddr to location after first JNE`)
+	cmpAddr += prefix.byteCount();
+
+	$$(_, 2.3, `Change the first JNE`)
+	Exe.SetJMP(cmpAddr + jnePos);
+
+	$$(_, 3.1, `Goto the jumped address`)
+	const travel = (jnePos === -2) ? 1 : 4;
+	const jmpedAddr = Exe.GetTgtAddr(cmpAddr - travel, PHYSICAL, travel);
+
+	$$(_, 3.2, `Construct new function code to use as replacement for CModeMgr::Quit (original one will get overwritten by RestoreLoginWindow)`)
+	let code =
+		MOV(EAX, [ECX, 4])   //mov eax, dword ptr [ecx+4]
+	+   MOV([EAX, 0x14], 0)  //mov dword ptr [eax+14h], 0
+	+   MOV([ECX], 0)        //mov dword ptr [ecx], 0
+	+   RETN()               //retn
+	;
+
+	$$(_, 3.3, `Add the function`)
+	const [, freeVir] = Exe.AddHex(code, 0x10);
+
+	$$(_, 3.4, `Change the CALLed address from CModeMgr::Quit to our function`)
+	Exe.SetTgtAddr(jmpedAddr + 6, freeVir); //5 for the MOV ECX, g_modeMgr & 1 for opcode of CALL CModeMgr::Quit
+
+	$$(_, 4.1, `Find the string 'btn_request_b' (the prefix string for the button in pressed state)`)
+	const btnAddr = Exe.FindText("btn_request_b");
+	if (btnAddr < 0)
+		throw Error("'btn_request_b' not found");
+
+	$$(_, 4.2, `Find where it is assigned`)
+	if (Exe.Version === 9) //VC9
+	{
+		addr = Exe.FindHex( MOV([ROC.StkReg, ROC.HasFP ? WCp : POS2WC], btnAddr) ); //mov dword ptr [ebp+disp8A] / [esp+dispA], <btnAddr>
+	}
+	else //VC6, VC10, VC11
+	{
+		addr = Exe.FindHex( MOV([ROC.StkReg, ROC.HasFP ? NEG2WC : WCn], btnAddr) ); //mov dword ptr [ebp-dispB] / [esp-disp8B], <btnAddr>
+	}
+
+	if (addr < 0)
+		throw Error("'btn_request_b' not assigned");
+
+	$$(_, 4.3, `Find the Langtype comparison after the assignment`)
+	code =
+		CMP(R32, 3)             //cmp regA, 3 ; 03 is for register button
+	+   JNE(0x25)               //jne short _skip#3
+	+   MOV(EAX, [LANGTYPE])    //mov eax, dword ptr [g_serviceType]
+	;
+
+	cmpAddr = Exe.FindHex(code, addr + 0xA0, addr + 0x100);
+	if (cmpAddr < 0)
+		throw Error("Second Langtype comparison not found");
+
+	$$(_, 4.4, `Change the conditional jump (This way no Langtype check occurs for any of the login window buttons)`)
+	Exe.SetJMP(cmpAddr + 3);
+
+	return true;
+};
+
+///
+/// \brief Disable for unsupported clients (Only needed if login window is hidden)
+///
+ShowRegisterBtn.validate = HasHiddenLogWin;
+
+///
+/// \brief Modify the coordinates of Login and Cancel buttons to show both in Login Screen
+///
+ShowCancelBtn = function(_)
+{
+	$$(_, 1.1, `Find the string 'btn_intro_b'`)
+	const btnAddr = Exe.FindText("btn_intro_b");
+	if (btnAddr < 0)
+		throw Error("'btn_intro_b' not found");
+
+	$$(_, 1.2, `Find where it is assigned (inside UILoginWnd::OnCreate)`)
+	let code = Exe.Version === 9
+	?
+		MOV([ESP, POS2WC], btnAddr)                            //mov dword ptr [esp + dispC], <btnAddr> ; VC9 didn't use FP
+	:                                                          //  OR
+		MOV( ROC.HasFP ? [EBP, NEG2WC] : [ESP, WCn], btnAddr)  //mov dword ptr [ebp/esp - dispC], <btnAddr>
+	;
+
+	let addr = Exe.FindHex(code);
+	if (addr < 0)
+		throw Error("'btn_intro_b' not assigned");
+
+	$$(_, 1.3, `Set addr to the MOV instruction after the assignment`)
+	addr += code.byteCount();
+
+	$$(_, 2.1, `Find the X-coord assignment of login button (btn_connect)`)
+	const reg = ROC.StkReg;
+	code = MOV([reg, WC], 0xBD); //mov dword ptr [ebp - disp8C], 0BDh OR mov dword ptr [esp + disp8C], 0BDh
+
+	let addr2 = Exe.FindHex(code, addr, addr + 0x40);
+
+	if (addr2 < 0) //x > 0x7F (haven't seen it so far though)
+	{
+		code = MOV([reg, ROC.HasFP ? NEG1WC : POS1WC], 0xBD); //mov dword ptr [ebp - dispD], 0BDh OR mov dword ptr [esp + dispD], 0BDh
+		addr2 = Exe.FindHex(code, addr, addr + 0x40);
+	}
+	if (addr2 < 0)
+		throw Error("'btn_connect' coordinate not found");
+
+	$$(_, 2.2, `Set addr to location after the X-Coord assignment`)
+	addr = addr2 + code.byteCount();
+
+	$$(_, 2.3, `Change 0BDh to 90h (its not a NOP xD)`)
+	Exe.SetInt32(addr - 4, 0x90);
+
+	$$(_, 3.1, `Find the X-Coord assignment of cancel button (btn_cancel)`)
+	code = code.replace("BD 00", "B2 01"); //swap 0BD with 1B2 in the search pattern
+
+	addr = Exe.FindHex(code, addr, addr + 0x30);
+	if (addr < 0)
+		throw Error("'btn_cancel' coordinate not found");
+
+	$$(_, 3.2, `Set addr to location after the X-Coord assignment`)
+	addr += code.byteCount();
+
+	$$(_, 3.3, `Change Change 1B2h to 0BDh`)
+	Exe.SetInt32(addr - 4, 0xBD);
+
+	return true;
+};
+
+///
+/// \brief Disable for unsupported clients (Only needed with hidden login window. It shows exit button instead of cancel)
+///
+ShowCancelBtn.validate = HasHiddenLogWin;
+
+///
+/// \brief Change the coordinates of selectserver and replay buttons.
+///        Also modifies the ShowMsg function for Replay List box to make it
+///        return to Select Service window
+///
+
+///*  ShowReplayBtn — 20250529
+
+ShowReplayBtn = function(_)
+{
+    const s = Exe.FindText("replay_interface\\btn_replay_a", CASE_INSENSITIVE, false);
+    if (s < 0) throw Error("replay_interface\\btn_replay_a not found");
+
+    const a = Exe.FindHex("C7 45 C8 " + s.toHex());
+    if (a < 0) throw Error("replay btn string assignment (usage) not found");
+
+    $$( _, "1.1", "Set [ebp-18] = 4 (button coord)");
+    Exe.SetHex(a + 0x34, "C7 45 E8 04 00 00 00");
+
+    $$( _, "1.2", "Force enable replay (JNE→JMP)");
+    Exe.SetHex(a + 0x72, "EB");
+
+    $$( _, "2.1", "Locate push 2729h");
+    let pushVA = Exe.FindHex("68 29 27 00 00 FF 50 18");
+    if (pushVA < 0)
+        throw Error("push 2729h not found");
+    let retnVA = pushVA + 5;
+
+    $$( _, "2.2", "00BFC810");
+	let sigVA = Exe.FindHex(
+		"E9 ?? ?? ?? ?? 55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 A1 ?? ?? ?? ?? 33 C5 50"
+	);
+
+	let tgtFunc;
+	if (sigVA >= 0)
+	{
+		// JMP +5 → 55 위치 (00BFC810)
+		tgtFunc = Exe.Phy2Vir(sigVA + 5, CODE);
+	}
+	else
+	{
+		$$( _, "2.3", `On 2026 the accessor no longer starts with the plain
+		     'push ebp / mov ebp,esp / push -1 / push <seh> / mov eax,fs:[0] / push eax / mov eax,<cookie>'
+		     sequence (it saves ebx/esi/edi in between) and it is not preceded by a JMP, so the
+		     signature above cannot match. Identify it by behaviour instead: it is the ONLY function
+		     in the client that is called twice back to back with 'mov esi, eax' in between - the
+		     idiom used to grab the same singleton for two different purposes.
+		     Measured: 2025-07-16 -> 0x00C14D60 (326 such sites, single target),
+		               2026-02-19 -> 0x00C7D7D0 (327 such sites, single target).`);
+
+		const dblCall =
+			CALL(ALLWC)     //call <acc>
+		+	MOV(ESI, EAX)   //mov esi, eax
+		+	CALL(ALLWC)     //call <acc>
+		;
+
+		const tally = {};
+		let best = -1, bestCount = 0;
+
+		for (const site of Exe.FindHexN(dblCall))
+		{
+			const t1 = Exe.GetTgtAddr(site + 1);
+			const t2 = Exe.GetTgtAddr(site + 8);
+			if (t1 !== t2)
+				continue;
+
+			const count = (tally[t1] || 0) + 1;
+			tally[t1] = count;
+
+			if (count > bestCount)
+			{
+				best = t1;
+				bestCount = count;
+			}
+		}
+
+		if (bestCount < 50)
+			throw Error("Replay hook pattern not found");
+
+		tgtFunc = best;
+	}
+
+    $$( _, "3.1", "Build hook stub");
+    let code =
+        PUSHAD +
+        CALL(Filler(1)) +        // call 00BFC810
+        MOV([EAX, 0x6C], 0) +    // [eax+6C] = 0
+        POPAD +
+        PUSH(0x2722) +           // push 2722h
+        JMP(Filler(2));          // jmp back
+
+    const args = {
+        targets : {
+            1 : tgtFunc,                   // 00BFC810
+            2 : Exe.Phy2Vir(retnVA, CODE)  // return addr
+        }
+    };
+
+    AutoHook(pushVA, code, args);
+
+    return true;
+};
+
+///
+/// \brief Validate replay UI exists
+///
+ShowReplayBtn.validate = () =>
+    Exe.FindText("replay_interface\\btn_replay_a", PHYSICAL, false) > 0
+ || Exe.FindText("replay_interface\\btn_replay_b", PHYSICAL, false) > 0
+ || Exe.FindText("replay_interface\\btn_replay",   PHYSICAL, false) > 0;
