@@ -46,7 +46,7 @@ OpenToServiceSelect = function(_)
 	let sw = Exe.FindHex(code, addr - 0x300, addr);
 
 	/**==================================================================
-	2026 clients (BuildDate >= 20260211) grew the switch cases that sit
+	2026 clients (BuildDate >= 20260210) grew the switch cases that sit
 	between the dispatcher and the 0BD5 MsgString reference, so the
 	dispatcher is now 0x346 bytes before the PUSH instead of 0x1C7.
 	Retry with a wider window - measured on 2026-02-19 there is still

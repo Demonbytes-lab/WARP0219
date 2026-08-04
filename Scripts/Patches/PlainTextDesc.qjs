@@ -93,7 +93,7 @@ PlainTextDesc = function(_)
 	let done = false;
 	if (addr < 0 && Exe.Version !== 6)
 	{
-		$$(_, '2.1', `2026-02-19 client (BuildDate 20260211) - two things changed at this site:
+		$$(_, '2.1', `2026-02-19 client (BuildDate 20260210) - two things changed at this site:
 		              (a) DataTxtDecode is unchanged in shape but the supplied base already has its JNZ
 		                  flipped to an unconditional JMP (same displacement), i.e. the patch is in effect,
 		              (b) the comparison must not be tied to [LANGTYPE] - wildcard the global instead so

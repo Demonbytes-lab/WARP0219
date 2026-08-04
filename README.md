@@ -34,7 +34,7 @@ and build on it.
 | | |
 |---|---|
 | **Client** | `Ragexe` — February 2026-02-19 |
-| **Internal BuildDate** | `20260211` |
+| **Internal BuildDate** | `20260210` |
 | **PE TimeDateStamp** | `0x698BD9AB` |
 | **ImageBase** | `0x00400000` |
 | **State** | Unpacked / Themida-free (patch-ready) |

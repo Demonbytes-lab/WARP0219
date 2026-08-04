@@ -58,7 +58,7 @@ EnableWho = function(_)
 	}
 	else
 	{
-		$$(_, 1.4, `2026-02-19 client (BuildDate 20260211) - the supplied base already carries this change.
+		$$(_, 1.4, `2026-02-19 client (BuildDate 20260210) - the supplied base already carries this change.
 		            The 3 comparisons are gone: 'mov eax, dword ptr [g_serviceType]' is followed by a short
 		            JMP over a run of NOPs that lands exactly on the 'mov eax, 0C1h' the chain used to guard,
 		            which is precisely the shape step 1.3 produces. Detect that and accept it.
@@ -181,7 +181,7 @@ EnableShowName = function(_)
 		return true;
 	}
 
-	$$(_, 3, `2026-02-19 client (BuildDate 20260211) - CSession::SetTextType in the supplied base already
+	$$(_, 3, `2026-02-19 client (BuildDate 20260210) - CSession::SetTextType in the supplied base already
 	          has this JZ flipped to an unconditional JMP (identical displacement, the rest of the chain
 	          - cmp 6 / cmp 0Ah / cmp 0Ch / cmp 2 - is untouched, only the 'cmp eax, 15h' case that kRO
 	          dropped along with the removed services is missing). So the patch is already in effect;

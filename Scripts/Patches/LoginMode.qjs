@@ -113,7 +113,7 @@ UseSSOLogin = function(_)
 			return true;
 		}
 
-		$$(_, 2.3, `2026-02-19 client (BuildDate 20260211) - in the supplied base the entire Langtype chain
+		$$(_, 2.3, `2026-02-19 client (BuildDate 20260210) - in the supplied base the entire Langtype chain
 		            inside CLoginMode::OnChangeState has already been overwritten with
 		            'jmp short <oldLogin>' + NOP padding, which is exactly what UseOldLogin leaves behind.
 		            The JZs this patch normally flips therefore no longer exist and neither do their
@@ -205,7 +205,7 @@ UseOldLogin = function(_)
 		addr = Exe.FindHex(parts);
 	}
 	/**==================================================================
-	2026-02-19 (BuildDate 20260211) - the supplied base already has this
+	2026-02-19 (BuildDate 20260210) - the supplied base already has this
 	patch's own end state baked in, so there is no comparison left to NOP.
 
 	2025-07-16, CLoginMode::OnChangeState @00D255CE:

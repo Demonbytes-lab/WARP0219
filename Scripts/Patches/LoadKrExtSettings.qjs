@@ -53,7 +53,7 @@ LoadKrExtSettings = function(_)
     const cmpAddr = Exe.FindHex(cmpSig, refAddr - 0x500, refAddr);
     if (cmpAddr < 0)
     {
-        $$(_, '2.1.1', `2026-02-19 client (BuildDate 20260211) - the supplied base already carries this
+        $$(_, '2.1.1', `2026-02-19 client (BuildDate 20260210) - the supplied base already carries this
                         patch. The selector reads 'jmp <cmpAddr+0x15>' (E9 10 00 00 00, exactly what 2.2
                         below writes) and the original 'cmp eax,imm / ja _skip / jmp [eax*4+table]' dispatch
                         that followed it is still sitting there orphaned - nothing branches into it and the

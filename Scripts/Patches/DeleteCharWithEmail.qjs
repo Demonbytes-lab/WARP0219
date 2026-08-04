@@ -110,7 +110,7 @@ DeleteCharWithEmail = function(_)
 		addr = Exe.FindHex(prefix + suffix);
 		if (addr < 0)
 		{
-			$$(_, '3.1.1', `2026-02-19 client (BuildDate 20260211) - this site is byte for byte the same as
+			$$(_, '3.1.1', `2026-02-19 client (BuildDate 20260210) - this site is byte for byte the same as
 			                on 2025-07-16 (cmp [g],0 / mov regB,717h / mov regA,12Bh / cmove / push regA),
 			                so nothing has to be re-shaped. What breaks is only the [LANGTYPE] operand:
 			                LANGTYPE does not resolve to g_serviceType on this build, so the comparison

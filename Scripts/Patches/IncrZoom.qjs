@@ -18,7 +18,7 @@ IncrZoom = function(_) {
     // they anchor the match to the pool entry and keep it unique.
     //
     // 2025-07-16 ships FAR_DIST = 480.0 ("00 00 F0 43").
-    // The 2026-02-19 client (BuildDate 20260211) raised the stock zoom-out limit to 730.0
+    // The 2026-02-19 client (BuildDate 20260210) raised the stock zoom-out limit to 730.0
     // ("00 80 36 44"); 480.0 is no longer present in the pool at all. Verified: the FAR_DIST
     // selector at 0x006C4631 loads 0x010DD250 (= 730.0) and 730.0 occurs exactly once in
     // the whole file, at that pool slot, followed by 640.0. So the 6 byte pattern stays unique.

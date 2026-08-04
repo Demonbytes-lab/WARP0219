@@ -36,7 +36,7 @@ ChatRepeat = function(_)
 {
 
   //The comparison is followed by the UIWindowMgr::MakeWindow argument PUSHes.
-  //2025-07-16 pushes 4 zeroes before 'push 3'; the 2026-02-19 client (BuildDate 20260211)
+  //2025-07-16 pushes 4 zeroes before 'push 3'; the 2026-02-19 client (BuildDate 20260210)
   //gained one extra parameter on that call, so it pushes 5 zeroes instead
   //(verified at 0x00CF0B45 : cmp [ebp+8],2 / jl / 6A 00 x5 / 6A 03 / mov ecx,<g_windowMgr> / call).
   //Try the older shape first so pre-2026 clients keep matching exactly as before.

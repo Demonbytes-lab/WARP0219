@@ -50,7 +50,7 @@ CustomWinTitle = function(_)
 	if (addr < 0)
 	{
 		$$(_, 1.3, `No title literal - locate g_title through the CreateWindowExA arguments instead`)
-		///  The 2026-02-19 client (BuildDate 20260211) keeps most of its init strings XOR
+		///  The 2026-02-19 client (BuildDate 20260210) keeps most of its init strings XOR
 		///  encrypted and unpacks them at runtime (decryptor at 0x005A45E0, ~2400 call sites),
 		///  so there is no 'Ragnarok' literal left to search for - and consequently no
 		///  'mov dword ptr [g_title], offset "Ragnarok"' to retarget either. What it does at

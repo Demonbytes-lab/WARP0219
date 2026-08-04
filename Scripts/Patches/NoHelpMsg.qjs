@@ -68,7 +68,7 @@ NoHelpMsg = function(_)
 
 	if (cmpAddr < 0 && Exe.Version >= 11)
 	{
-		$$(_, 1.4, `2026-02-19 client (BuildDate 20260211). Step 1.2 only pins down the message PUSHes,
+		$$(_, 1.4, `2026-02-19 client (BuildDate 20260210). Step 1.2 only pins down the message PUSHes,
 		            and 'push 0Eh ; push 2Ah' occurs ~900 times in this build, so the very first hit is
 		            nowhere near the OnLogin callback and the ranged search above can never succeed.
 		            Re-anchor on the whole callback shape in one pattern instead - it is unique:

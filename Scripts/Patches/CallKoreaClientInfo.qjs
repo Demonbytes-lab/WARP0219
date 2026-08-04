@@ -220,7 +220,7 @@ CallKoreaClientInfo = function(_)
 /// \brief Variant for the 2026+ clients, where "Unknown ServiceType !!!" only
 ///        exists as XOR encrypted data (see Scripts/Support/EncStrings.qjs).
 ///
-/// Measured on 2026-02-19 (BuildDate 20260211):
+/// Measured on 2026-02-19 (BuildDate 20260210):
 ///
 ///   InitClientInfo        0x00ACFF90  switch 0x00ACFFD7  jmpTbl 0x00AD0DD8
 ///        [0] 0x00ACFFE5  90 90 90 90 90 + jmp 0x00AD00A1

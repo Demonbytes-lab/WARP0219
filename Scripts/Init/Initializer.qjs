@@ -30,9 +30,9 @@
 /// \brief Verify the client build is one this distribution has been validated against.
 ///        Upstream WARP is build-agnostic; this guard is a local restriction, so it is a
 ///        list rather than a single hardcoded date.
-///        Note: the 2026-02-19 client reports BuildDate 20260211, not 20260219.
+///        Note: the 2026-02-19 client reports BuildDate 20260210, not 20260219.
 ///
-const SUPPORTED_BUILDS = [20250716, 20260211, 20260716];
+const SUPPORTED_BUILDS = [20250716, 20260210, 20260716];
 if (!SUPPORTED_BUILDS.includes(Exe.BuildDate))
 	throw Error("This WARP distribution supports " + SUPPORTED_BUILDS.join("/") + " only (BuildDate " + Exe.BuildDate + " is not supported)");
 
