@@ -1,0 +1,77 @@
+AllowHostnameAddress = function(_)
+{
+	$$(_, 1.1, `Find the address conversion - MOV EDX, converter ; CALL EDX ; BSWAP EAX`)
+	const addr = Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8");
+	if (addr < 0)
+		throw Error("Address conversion not found");
+
+	$$(_, 1.2, `Extract the converter address`)
+	const cvtVir = Exe.GetInt32(addr + 1);
+	const cvtPhy = Exe.Vir2Phy(cvtVir);
+	if (cvtPhy < 0)
+		throw Error("Converter outside the image");
+
+	$$(_, 1.3, `Extract the string accessor it opens with`)
+	const cvtRef = Exe.FindHex("56 57 53 85 C0 74 ?? BA ?? ?? ?? ?? FF D2", cvtPhy, cvtPhy + 0x20);
+	if (cvtRef < 0)
+		throw Error("Converter prologue mismatch");
+
+	const strVir = Exe.GetInt32(cvtRef + 8);
+
+	$$(_, 1.4, `Extract &gethostbyname`)
+	const ghbnRef = Exe.FindHex("FF 15 ?? ?? ?? ?? 85 C0 74 ?? 8B 40 0C 8B 00 FF 30 FF 15");
+	if (ghbnRef < 0)
+		throw Error("gethostbyname reference not found");
+
+	const ghbnPtr = Exe.GetInt32(ghbnRef + 2);
+
+	$$(_, 1.5, `Extract &WSAStartup`)
+	const wsaRef = Exe.FindHex("68 ?? ?? ?? ?? 68 01 01 00 00 FF 15 ?? ?? ?? ??");
+	if (wsaRef < 0)
+		throw Error("WSAStartup reference not found");
+
+	const wsaPtr = Exe.GetInt32(wsaRef + 12);
+
+	$$(_, 2.1, `Reserve a WSADATA buffer`)
+	const [, wsaData] = Exe.AddHex(" 00".repeat(0x190));
+
+	$$(_, 2.2, `Construct our function`)
+	const code =
+		" 50"
+	+	" BA" + cvtVir.toHex(4)
+	+	" FF D2"
+	+	" 85 C0"
+	+	" 75 32"
+	+	" 68" + wsaData.toHex(4)
+	+	" 68 02 02 00 00"
+	+	" FF 15" + wsaPtr.toHex(4)
+	+	" 8B 04 24"
+	+	" BA" + strVir.toHex(4)
+	+	" FF D2"
+	+	" 50"
+	+	" FF 15" + ghbnPtr.toHex(4)
+	+	" 85 C0"
+	+	" 74 0F"
+	+	" 8B 40 0C"
+	+	" 8B 00"
+	+	" 85 C0"
+	+	" 74 06"
+	+	" 8B 00"
+	+	" 0F C8"
+	+	" 5A"
+	+	" C3"
+	+	" 5A"
+	+	" 33 C0"
+	+	" C3"
+		;
+
+	$$(_, 2.3, `Add our function to the Exe`)
+	const [, funcVir] = Exe.AddHex(code, 0x10);
+
+	$$(_, 2.4, `Redirect the conversion to use it instead`)
+	Exe.SetInt32(addr + 1, funcVir);
+
+	return true;
+};
+
+AllowHostnameAddress.validate = () => Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8") > 0;

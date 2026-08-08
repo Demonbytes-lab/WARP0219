@@ -48,8 +48,14 @@ CustomNW:
             title : Enable proxy support
             recommend : no
             author : Ai4rei/AN , Neo-Mind,Skylove
-            desc : Ignores the IP addresses sent by the server when transitioning between login, char, and map servers. Keeps the client connecting to the address from clientinfo.xml instead. Required when playing through a proxy, VPN, or when the server reports internal LAN addresses.
-            
+            desc : Ignores the IP addresses sent by the server when transitioning between login, char, and map servers. Keeps the client connecting to the address from clientinfo.xml instead including domains.
+
+        - AllowHostnameAddress:
+            title : Accept hostname in clientinfo address
+            recommend : yes
+            author : Noxara Solutions
+            desc : Lets the address tag in clientinfo.xml hold a domain or subdomain instead of an IP.
+
 #        - NoHardCodedAddr:
 #            title : Remove hardcoded address/port
 #            recommend : yes
