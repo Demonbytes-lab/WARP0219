@@ -32,6 +32,12 @@ CustomUI:
     color : orangered
     
     patches:
+        - EqAttrEnglishTabs:
+            title : Equipment Attribute tabs in English
+            recommend : yes
+            author : Noxara Solutions
+            desc : Rewrites the 8 Korean category tab labels in the Equipment Attribute window to short English (St/Ab/Bt/El/Rc/Sk/Sp/Al).
+
         - KeepWhisperOnTeleport:
             title : Keep Whisper Window on Teleport
             recommend : yes

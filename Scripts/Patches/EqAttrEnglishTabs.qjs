@@ -1,0 +1,57 @@
+EqAttrEnglishTabs = function(_)
+{
+	$$(_, 1.1, `Find CUITextButton::SetText`)
+	const setP = Exe.FindHex("55 8B EC 8B 45 08 56 8B F1 8D 8E F0 00 00 00");
+	if (setP < 0)
+		throw Error("SetText not found");
+
+	const setV = Exe.Phy2Vir(setP, CODE);
+	const BACK = setV + 6;
+
+	$$(_, 1.2, `Add the English label strings`)
+	const LABELS = [
+		[0xC8C5BABD, "St"],
+		[0xF4BAEEBE, "Ab"],
+		[0xF5C5FCC0, "Bt"],
+		[0xBABCD3BC, "El"],
+		[0xB7C1BEC1, "Rc"],
+		[0xB3C5BABD, "Sk"],
+		[0xF6BCAFC6, "Sp"],
+		[0xBCC3FCC0, "Al"],
+	];
+
+	const engV = [];
+	LABELS.forEach( ([, en]) =>
+	{
+		const hex = en.split('').map(c => c.charCodeAt(0).toHex(1)).join(' ') + " 00";
+		const [, v] = Exe.AddHex(hex);
+		engV.push(v);
+	});
+
+	$$(_, 1.3, `Add the lookup table`)
+	let tbl = "";
+	LABELS.forEach( ([kd, en], i) =>
+		tbl += kd.toHex(4) + engV[i].toHex(4) + en.length.toHex(4)
+	);
+	const [, tblV] = Exe.AddHex(tbl);
+
+	$$(_, 1.4, `Add the detour code-cave`)
+	const code =
+		"60 8B 74 24 24 83 7E 14 10 73 30 83 7E 10 04 75 2A 8B 06 BA"
+	+	tblV.toHex(4)
+	+	" B9 08 00 00 00 3B 02 74 08 83 C2 0C 49 75 F6 EB 12 8B 5A 08"
+	+	" 89 5E 10 89 F7 8B 72 04 89 D9 F3 A4 C6 07 00 61 55 89 E5 8B 45 08 68"
+	+	BACK.toHex(4)
+	+	" C3";
+
+	const [, detV] = Exe.AddHex(code, 0x10);
+
+	$$(_, 1.5, `Hook SetText -> detour`)
+	const rel = detV - (setV + 5);
+	Exe.SetHex(setP, "E9" + rel.toHex(4) + " 90");
+
+	return true;
+};
+
+EqAttrEnglishTabs.validate = () =>
+	Exe.FindHex("55 8B EC 8B 45 08 56 8B F1 8D 8E F0 00 00 00") > 0;
