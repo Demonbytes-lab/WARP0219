@@ -1,0 +1,9 @@
+- { font: 1, color: "FF99FF" }
+- { font: 2, color: "99FFFF" }
+- { font: 3, color: "FFFF99" }
+- { font: 4, color: "99FF99" }
+- { font: 5, color: "FFCC66" }
+- { font: 6, color: "99CCFF" }
+- { font: 7, color: "FFFFFF" }
+- { font: 8, color: "FF6666" }
+- { font: 9, color: "CC99FF" }

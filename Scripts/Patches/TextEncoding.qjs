@@ -1,0 +1,37 @@
+TextEncoding = function(_)
+{
+	$$(_, 1.1, `Ask which language / code page the client should use`)
+	const key = Exe.GetUserInput('$textLang', D_Choice, "Text Encoding",
+		"Select the language / code page used for ALL client text (item info, chat, UI). ASCII/English stays readable.",
+		"Simplified Chinese (GBK 936)",
+		{choices: Object.getOwnPropertyNames(this.Data), saveDefault: true});
+	if (key === false)
+		Cancel("Text encoding reverted");
+	const idx = this.Data[key];
+
+	$$(_, 2.1, `Find the langtype -> code page switch`)
+	const addr = Exe.FindHex(
+		" A1 ?? ?? ?? ??" +
+		" 83 F8 14" +
+		" 0F 87 ?? ?? ?? ??" +
+		" FF 24 85");
+	if (addr < 0)
+		throw Error("Langtype code-page switch not found (build mismatch)");
+
+	$$(_, 3.1, `Force the switch to the chosen langtype branch`)
+	Exe.SetHex(addr, " B8" + (idx).toHex(4));
+	return true;
+};
+
+TextEncoding.Data =
+{
+	"Korean (949)":                0,
+	"Japanese (932)":              2,
+	"Simplified Chinese (GBK 936)": 3,
+	"Traditional Chinese (Big5 950)": 4,
+	"Thai (874)":                  5,
+	"Western / Latin (1252)":      12,
+	"Russian / Cyrillic (1251)":   14,
+	"Vietnamese (1258)":           15,
+	"Arabic (1256)":               19,
+};

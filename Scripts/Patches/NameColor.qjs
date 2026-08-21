@@ -1,0 +1,130 @@
+NameColor = function(_)
+{
+	$$(_, 1.1, `Build the color table (font 1-9 -> BGR name color) from NameColors.yml`)
+	let cols = [0, 0x0000FF, 0x0080FF, 0x00FFFF, 0x00FF00, 0xFFFF00, 0xFF8000, 0xFF00FF, 0xCC66FF, 0xFFFFFF];
+	const spec = Warp.LoadYaml("Inputs/NameColors.yml");
+	if (spec !== false && IsArr(spec))
+	{
+		for (const row of spec)
+		{
+			const f = (row.font | 0);
+			if (f >= 1 && f <= 9 && row.color)
+			{
+				const v = parseInt(String(row.color), 16) & 0xFFFFFF;
+				cols[f] = ((v & 0xFF) << 16) | (v & 0xFF00) | ((v >> 16) & 0xFF);
+			}
+		}
+	}
+
+	$$(_, 1.2, `Ask which names should be colored`)
+	const CH = ["Both (over-head + foot)", "Over-head name only", "Foot name only"];
+	const sel = Exe.GetUserInput('$NameColorScope', D_Choice, "Name Color Scope",
+		"Which player names should be colored by the character's @font value?",
+		CH[0], { choices: CH });
+	if (!sel)
+		return false;
+
+	const doOver = (sel === CH[0] || sel === CH[1]);
+	const doFoot = (sel === CH[0] || sel === CH[2]);
+
+	$$(_, 2.1, `Locate the over-head font-selection (also yields the myAID and self-font globals)`)
+	const ovAnchor =
+		" 3B 05" + ALLWC +
+		" 75 13" +
+		" 66 0F BE 05" + ALLWC +
+		" 0F B7 D0" +
+		" 8B 85 14 FF FF FF" +
+		" EB 0D" +
+		" 8B 85 14 FF FF FF" +
+		" 0F B7 90 FC 00 00 00" +
+		" 66 89 91 9A 00 00 00";
+	const ovA = Exe.FindHex(ovAnchor);
+	if (ovA < 0)
+		throw Error("NameColor: over-head anchor not found (build mismatch)");
+
+	const myAID    = Exe.GetInt32(ovA + 2);
+	const selfFont = Exe.GetInt32(ovA + 0xC);
+	const ovInjP   = ovA + 0x28;
+	const ovInjV   = Exe.Phy2Vir(ovInjP);
+
+	$$(_, 2.2, `Locate the over-head render (UIVerticalNameBalloonText)`)
+	const rendAnchor = " 55 8B EC 83 EC 10 56 8B F1 8B 86 84 00 00 00";
+	const rendP = doOver ? Exe.FindHex(rendAnchor) : 0;
+	if (doOver && rendP < 0)
+		throw Error("NameColor: over-head render anchor not found (build mismatch)");
+	const rendV = doOver ? Exe.Phy2Vir(rendP) : 0;
+
+	$$(_, 2.3, `Locate the foot name-plate populate tail (UINameBalloonText)`)
+	const footAnchor = " 55 8B EC 83 EC 08 53 8B 5D 08 56 57 6A 5C";
+	const footP = doFoot ? Exe.FindHex(footAnchor) : 0;
+	if (doFoot && footP < 0)
+		throw Error("NameColor: foot anchor not found (build mismatch)");
+	const footV = doFoot ? Exe.Phy2Vir(footP) : 0;
+
+	$$(_, 3.1, `Reserve the shared color table + selected code caves`)
+	let tbl = "";
+	for (let i = 0; i < 10; i++)
+		tbl += " " + cols[i].toHex(4);
+
+	let total = 0x28;
+	let footOff = -1, rendOff = -1, popOff = -1;
+	if (doFoot) { footOff = total; total += 0x5C; }
+	if (doOver) { rendOff = total; total += 0x49; popOff = total; total += 0x15; }
+
+	const [free, freeV] = Exe.Allocate(total);
+	const CTV = freeV;
+	Exe.SetHex(free, tbl);
+
+	if (doFoot)
+	{
+		$$(_, 3.2, `Foot name-plate: color from the actor @font`)
+		const fCode =
+			" 60 8B 74 24 24 8B 7C 24 28 A1 AA AA AA AA" +
+			" 39 87 10 01 00 00 74 11 39 87 EC 02 00 00 74 09" +
+			" 0F B7 9F FC 00 00 00 EB 07 0F B6 1D BB BB BB BB" +
+			" 83 FB 01 72 1C 83 FB 09 77 17 8B 04 9D CC CC CC CC" +
+			" 89 86 90 00 00 00 C7 86 94 00 00 00 00 00 00 00" +
+			" 61 55 8B EC 83 EC 08 53 E9 DD DD DD DD";
+		const fCave = free + footOff, fCaveV = freeV + footOff;
+		Exe.SetHex(fCave, fCode);
+		Exe.SetInt32(fCave + 0x0A, myAID);
+		Exe.SetInt32(fCave + 0x2A, selfFont);
+		Exe.SetInt32(fCave + 0x3B, CTV);
+		Exe.SetInt32(fCave + 0x58, (footV + 7) - (fCaveV + 0x5C));
+
+		Exe.SetHex(footP, " E9 00 00 00 00 90 90");
+		Exe.SetInt32(footP + 1, fCaveV - (footV + 5));
+	}
+
+	if (doOver)
+	{
+		$$(_, 3.3, `Over-head populate: stash the font, drop the weird-font style`)
+		const pCode =
+			" 66 89 91 98 00 00 00" +
+			" 66 C7 81 9A 00 00 00 00 00" +
+			" E9 DD DD DD DD";
+		const pCave = free + popOff, pCaveV = freeV + popOff;
+		Exe.SetHex(pCave, pCode);
+		Exe.SetInt32(pCave + 0x11, (ovInjV + 7) - (pCaveV + 0x15));
+
+		Exe.SetHex(ovInjP, " E9 00 00 00 00 90 90");
+		Exe.SetInt32(ovInjP + 1, pCaveV - (ovInjV + 5));
+
+		$$(_, 3.4, `Over-head render: color from the stashed font, clear per-line colors`)
+		const rCode =
+			" 60 8B F1 0F B7 9E 98 00 00 00 83 FB 01 72 2D 83 FB 09 77 28" +
+			" 8B 04 9D CC CC CC CC 89 86 90 00 00 00" +
+			" 8B 86 BC 00 00 00 8B 96 C0 00 00 00 39 D0 73 0B" +
+			" C7 00 00 00 00 00 83 C0 04 EB F1" +
+			" 61 55 8B EC 83 EC 10 56 E9 DD DD DD DD";
+		const rCave = free + rendOff, rCaveV = freeV + rendOff;
+		Exe.SetHex(rCave, rCode);
+		Exe.SetInt32(rCave + 0x17, CTV);
+		Exe.SetInt32(rCave + 0x45, (rendV + 7) - (rCaveV + 0x49));
+
+		Exe.SetHex(rendP, " E9 00 00 00 00 90 90");
+		Exe.SetInt32(rendP + 1, rCaveV - (rendV + 5));
+	}
+
+	return true;
+};

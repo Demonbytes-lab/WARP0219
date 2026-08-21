@@ -44,7 +44,13 @@ CustomChar:
             recommend : no
             author : Neo-Mind
             desc : Hides the special GM sprite (the yellow character) while keeping all GM functionality intact, including the yellow name color and admin right-click menu. GMs appear as their normal job class.
-        
+
+        - NameColor:
+            title : Per-player name colors (@font)
+            recommend : no
+            author : Noxara Solutions
+            desc : Colors a player's name by that character's <b>font</b> value (1-9), which the server sets with the default <b>@font</b> command. A dropdown lets you color the <b>over-head</b> name, the <b>foot</b> name (below the sprite), or both. Font 0 keeps the normal color. Colors are the 9 defaults in <b>Inputs/NameColors.yml</b> (editable, RRGGBB).
+
         - ShowBGEmblem:
             title : Enable Emblem hover for BG [Experimental]
             recommend : no

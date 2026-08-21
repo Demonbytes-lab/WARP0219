@@ -69,6 +69,12 @@ CustomData:
             author : CrazyBebop, CH.C (jchcc)
             desc : Fixes the character encoding (charset) used for official custom fonts (EOT and OTF) so they render correctly on all langtypes. Prevents garbled text when using custom fonts on non-Korean service types. Fixed EDI register clobber for 07-16.
         
+        - TextEncoding:
+            title : Set Text Language / Code Page
+            recommend : no
+            author : Noxara Solutions
+            desc : Forces the client's text code page to a chosen language (Simplified Chinese GBK, Traditional Chinese Big5, Japanese, Korean, Thai, Vietnamese, Cyrillic, Arabic, or Western). ASCII/English stays readable.
+
         - AlwaysAscii:
             title : Use Ascii on All
             recommend : no
