@@ -21,11 +21,11 @@ NameColor = function(_)
 	const sel = Exe.GetUserInput('$NameColorScope', D_Choice, "Name Color Scope",
 		"Which player names should be colored by the character's @font value?",
 		CH[0], { choices: CH });
-	if (!sel)
+	if (sel === false || sel === undefined || sel === null)
 		return false;
 
-	const doOver = (sel === CH[0] || sel === CH[1]);
-	const doFoot = (sel === CH[0] || sel === CH[2]);
+	const doOver = (sel === CH[0] || sel === CH[1] || sel === 0 || sel === 1);
+	const doFoot = (sel === CH[0] || sel === CH[2] || sel === 0 || sel === 2);
 
 	$$(_, 2.1, `Locate the over-head font-selection (also yields the myAID and self-font globals)`)
 	const ovAnchor =
