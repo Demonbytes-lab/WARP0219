@@ -38,16 +38,10 @@ CustomUI:
             author : Noxara Solutions
             desc : Rewrites the 8 Korean category tab labels in the Equipment Attribute window to short English (St/Ab/Bt/El/Rc/Sk/Sp/Al).
 
-        - KeepWhisperOnTeleport:
-            title : Keep Whisper Window on Teleport
-            recommend : yes
-            author : NoxaraRO
-            desc : Prevents the whisper (PM) window from closing when using Fly Wing, Butterfly Wing, or teleporting between maps. The conversation stays open across transitions.
-        
         - LoadGRFOnSlashCmd:
             title : Load GRF via Slash Command
             recommend : no
-            author : NoxaraRO
+            author : Noxara Solutions
             desc : Adds a configurable slash command (default /greyworld) that loads a specified GRF archive at runtime via CFileMgr::AddPak. Type the command in the chat window to toggle the GRF on. Assets become available on the next map change.
         
         - AllowShortcutsInWine:
@@ -182,24 +176,6 @@ CustomUI:
             author    : DemonBytes (NoxaraRO)
             desc      : Makes NPCs that use a PC-class view (e.g. 4_M_SAGE_C) honor <b>setunitdata(.npc_gid, UNPC_DEADSIT, 2)</b>. The client's translator normally skips the posture state for non-PC actors so such NPCs stay standing. This inserts a CCharacterNpc vtable check before that skip so only PC-view NPCs fall through to the sit-handler; all other NPCs retain default behavior.
 
-        - NpcDeadSitProbe:
-            title     : DEBUG probe — force [actor+0x304]=PROBE_N
-            recommend : no
-            author    : DemonBytes (NoxaraRO)
-            desc      : Debug probe. Replaces the conditional isBoss write at 0xCF6753/0xCF6755 (and 5 parallel sites) with an unconditional <b>mov byte [edi+0x304], PROBE_N</b>. Used to empirically determine what byte value of +0x304 (if any) drives a visible render state. Edit PROBE_N at top of NpcDeadSitProbe.qjs and rebuild.
-
-        - UIStatusFontSize:
-            title     : UIStatusWnd (ALT+A) Font Size
-            recommend : no
-            author    : DemonBytes (NoxaraRO)
-            desc      : Overrides the font size used by the ALT+A status window (Str/Agi/Vit/Int/Dex/Luk/Atk/Def). Patches 92 push-imm8 sites in the 0x880000-0x8D0000 VA range that feed cHeight into framework text-render calls (sub_a25a70 and kin). Only affects UIStatusWnd - chat NPCs tooltips unchanged.
-
-        - UIBasicInfoFontSize:
-            title     : UIBasicInfoWnd (top-left HUD) Font Size
-            recommend : no
-            author    : DemonBytes (NoxaraRO)
-            desc      : Overrides the font size used by the top-left HP/SP/Lv HUD. Patches 20 push-imm8 sites in the 0x950000-0x970000 VA range that feed cHeight into framework text-render calls. Only affects UIBasicInfoWnd - everything else unchanged.
-
         - MoveUpItemCount:
             title : Move Item Count Upwards
             recommend : no
@@ -307,12 +283,6 @@ CustomUI:
             recommend : yes
             author : Victor Hugo
             desc : Fixes a bug where shortcut bar items and skill bar positions reset every time you log in or change maps. Ensures your hotkey layout is properly saved and restored.
-
-        - ResizeCastingInfoWindow:
-            title : Resize Casting Information popup
-            recommend : no
-            author : NoxaraRO
-            desc : Shrink (or grow) the Casting Information popup that appears when clicking the clock icon on a skill description. Two prompts let you set horizontal and vertical scale percentages.
 
         - ChangeGoldPCMaxPoints:
             title : Change GoldPC Maximum Points Limit
