@@ -17,15 +17,15 @@ NameColor = function(_)
 	}
 
 	$$(_, 1.2, `Ask which names should be colored`)
-	const CH = ["Both (over-head + foot)", "Over-head name only", "Foot name only"];
+	const CH = ["-- select an option --", "Both (over-head + foot)", "Over-head name only", "Foot name only"];
 	const sel = Exe.GetUserInput('$NameColorScope', D_Choice, "Name Color Scope",
 		"Which player names should be colored by the character's @font value?",
 		CH[0], { choices: CH });
-	if (sel === false || sel === undefined || sel === null)
+	if (sel === false || sel === undefined || sel === null || sel === CH[0])
 		return false;
 
-	const doOver = (sel === CH[0] || sel === CH[1] || sel === 0 || sel === 1);
-	const doFoot = (sel === CH[0] || sel === CH[2] || sel === 0 || sel === 2);
+	const doOver = (sel === CH[1] || sel === CH[2]);
+	const doFoot = (sel === CH[1] || sel === CH[3]);
 
 	$$(_, 2.1, `Locate the over-head font-selection (also yields the myAID and self-font globals)`)
 	const ovAnchor =
