@@ -41,10 +41,10 @@ CustomPath = function(_)
 		Warp.SetPatchState("NoBGMAudio", false);
 
 	$$(_, 1.2, `Retrieve the data for the index`);
-	const {varName, prefix, strType, name, nameAddr} = this.Data.get(_);
+	const {varName, prefix, strType, name, nameAddr, regSites} = this.Data.get(_);
 
 	$$(_, 1.3, `Find location where the string is PUSHed`);
-	let addr = Exe.FindHex(PUSH(nameAddr));
+	let addr = regSites ? -1 : Exe.FindHex(PUSH(nameAddr));
 	let refAddrs;
 	let dest = ECX;
 	// Some builds reference the path via BOTH a "PUSH imm32" (68 imm32)
@@ -53,7 +53,7 @@ CustomPath = function(_)
 	// returning the original path, so the engine still resolves to the
 	// stale .lub. Patch the MOV site too (NoxaraRO 2025 Ragexe build
 	// has 'System\iteminfo_true.lub' read via MOV EAX at fn @0xA7EDF0).
-	let movAddr = Exe.FindHex(MOV(EAX, nameAddr));
+	let movAddr = regSites ? -1 : Exe.FindHex(MOV(EAX, nameAddr));
 	if (addr < 0)
 		addr = movAddr;
 
@@ -157,7 +157,7 @@ CustomPath = function(_)
 	}
 
 	{
-		const hasSite = (addr >= 0) || !!refAddrs;
+		const hasSite = (addr >= 0) || !!refAddrs || !!regSites;
 		if (!hasSite && !isQuestQuali)
 			throw Error(`'${name} not used`);
 	}
@@ -175,7 +175,31 @@ CustomPath = function(_)
 
 	const [, freeVir] = Exe.AddFromVar(varName);
 
-	if (refAddrs == undefined)
+	if (regSites)
+	{
+		// Preserve the 2026 client's XOR/TLS initialization.  Hook only the
+		// final loader call, after decoding has completed, and substitute the
+		// user path in the register passed as argument 1.
+		for (const [site, reg, pathLocal] of regSites)
+		{
+			const loader = Exe.GetTgtAddr(site + 5);
+			const resume = Exe.Phy2Vir(site + 9, CODE);
+			const code =
+				MOV(reg, freeVir)
+			+	PUSH(reg)
+			+	PUSH([EBP, pathLocal])
+			+	CALL(Filler(1))
+			+	JMP(Filler(2));
+
+			AutoHook(site, code,
+			{
+				targets : { 1 : loader, 2 : resume },
+				nops : 4
+			});
+		}
+	}
+
+	else if (refAddrs == undefined)
 	{
 		Exe.SetUint32(addr + 1, freeVir);
 		// If we also found a MOV EAX, imm32 getter at a DIFFERENT site
@@ -269,6 +293,51 @@ CustomPath = function(_)
 CustomPath.validate = function(_)
 {
 	let data = this.Data.get(_);
+
+	/* Ragexe 2026-02-19 stores these paths XOR-encoded, so FindText cannot
+	 * validate them.  Match the decoder sites (including their per-string
+	 * keys) and retain the final Lua-loader call sites.  The patch leaves the
+	 * TLS decoder intact and substitutes the path only at those calls. */
+	if (_ === 'CustomAchieveLub')
+	{
+		const sig =
+			"80 BE 8C 1F 00 00 00" +
+			" 8D B6 70 1F 00 00 74 ??" +
+			" 68 43 FB 0F 49 68 B9 0D 2F A1 6A 00 6A 1C 56";
+		const site = Exe.FindHex(sig);
+		if (site > 0)
+		{
+			data.name = data.knownName;
+			data.nameAddr = -1;
+			data.regSites = [[site + 0x2A, ESI, -0x34]];
+			return true;
+		}
+	}
+
+	if (_ === 'CustomTipboxLub')
+	{
+		const luaSig =
+			"80 BE 06 21 00 00 00" +
+			" 8D BE F4 20 00 00 74 ??" +
+			" 68 A5 63 EB 0B 68 A7 B3 05 C9 6A 00 6A 12 57";
+		const lubSig =
+			"80 BE 1E 21 00 00 00" +
+			" 8D B6 0C 21 00 00 74 ??" +
+			" 68 BB 33 83 07 68 C9 B7 25 97 6A 00 6A 12 56";
+		const luaSite = Exe.FindHex(luaSig);
+		const lubSite = Exe.FindHex(lubSig);
+		if (luaSite > 0 && lubSite > 0)
+		{
+			data.name = data.knownName;
+			data.nameAddr = -1;
+			data.regSites =
+			[
+				[luaSite + 0x2A, EDI, -0x48],
+				[lubSite + 0x2A, ESI, -0x48]
+			];
+			return true;
+		}
+	}
 
 	if ('parts' in data) //need to derive the name from parts and then find its address.
 	{
