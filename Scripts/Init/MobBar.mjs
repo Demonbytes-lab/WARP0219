@@ -219,7 +219,10 @@ export function load()
 		RetnAddr = Exe.Phy2Vir(hookAddr + 6);
 
 		$$(_, 3.6, `Extract the memory location & update the displacement to mob type flag`)
-		const ins = Instr.FromAddr(hookAddr + parts.byteCount(0, 1));
+		const movMemOff = (Exe.BuildDate == 20260210 || Exe.BuildDate == 20260211) ? OvrdSize : parts.byteCount(0, 1);
+		const ins = Instr.FromAddr(hookAddr + movMemOff);
+		if (!ins.MRM || ins.MRM.Mode === 3 || !Number.isFinite(ins.Disp))
+			throw Log.rise(ErrMsg = new Error(`${self} - MobType extraction landed on a non-memory instruction (MRM.Mode=${ins.MRM ? ins.MRM.Mode : 'none'}, Disp=${ins.Disp})`));
 		MobType = [ins.MRM.getReg('M'), ins.Disp + 4];
 	}
 
