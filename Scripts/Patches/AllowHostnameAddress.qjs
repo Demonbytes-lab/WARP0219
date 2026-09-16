@@ -1,7 +1,7 @@
 AllowHostnameAddress = function(_)
 {
 	$$(_, 1.1, `Find the address conversion - MOV EDX, converter ; CALL EDX ; BSWAP EAX`)
-	const addr = Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8");
+	const addr = Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8", 0, Exe.FileSize);
 	if (addr < 0)
 		throw Error("Address conversion not found");
 
@@ -19,14 +19,14 @@ AllowHostnameAddress = function(_)
 	const strVir = Exe.GetInt32(cvtRef + 8);
 
 	$$(_, 1.4, `Extract &gethostbyname`)
-	const ghbnRef = Exe.FindHex("FF 15 ?? ?? ?? ?? 85 C0 74 ?? 8B 40 0C 8B 00 FF 30 FF 15");
+	const ghbnRef = Exe.FindHex("FF 15 ?? ?? ?? ?? 85 C0 74 ?? 8B 40 0C 8B 00 FF 30 FF 15", 0, Exe.FileSize);
 	if (ghbnRef < 0)
 		throw Error("gethostbyname reference not found");
 
 	const ghbnPtr = Exe.GetInt32(ghbnRef + 2);
 
 	$$(_, 1.5, `Extract &WSAStartup`)
-	const wsaRef = Exe.FindHex("68 ?? ?? ?? ?? 68 01 01 00 00 FF 15 ?? ?? ?? ??");
+	const wsaRef = Exe.FindHex("68 ?? ?? ?? ?? 68 01 01 00 00 FF 15 ?? ?? ?? ??", 0, Exe.FileSize);
 	if (wsaRef < 0)
 		throw Error("WSAStartup reference not found");
 
@@ -74,4 +74,4 @@ AllowHostnameAddress = function(_)
 	return true;
 };
 
-AllowHostnameAddress.validate = () => Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8") > 0;
+AllowHostnameAddress.validate = () => Exe.FindHex("BA ?? ?? ?? ?? FF D2 0F C8", 0, Exe.FileSize) > 0;
