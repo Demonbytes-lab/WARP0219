@@ -1,0 +1,206 @@
+const EquipPropTabsWideGeometry =
+{
+	tabWidth   : 52,
+	titleWidth : 127
+};
+
+const EquipPropTabsWideHex = (addr, length) =>
+	(Exe.GetHex(addr, length) || "").replace(/\s+/g, "").toUpperCase();
+
+const EquipPropTabsWideLabelPattern = reg =>
+	  "8B " + reg + WC + WC + " 00 00 C7 45 E8" + ALLWC
+	+ " C6 45 EC" + WC
+	+ " A8 01 75" + WC
+	+ " 83 C8 01 89 " + reg + WC + WC + " 00 00"
+	+ " C7 45 FC" + WC + " 00 00 00"
+	+ " 0F 57 C0 66 0F 13 85 10 FF FF FF"
+	+ " 8B 95 14 FF FF FF 8B 8D 10 FF FF FF"
+	+ " C6 " + reg + WC + WC + " 00 00 01";
+
+const EquipPropTabsWideLabels = () =>
+{
+	for (const reg of ["86", "83"])
+	{
+		const addrs = Exe.FindHexN(EquipPropTabsWideLabelPattern(reg)).sort((a, b) => a - b);
+		if (addrs.length === 8)
+			return addrs;
+	}
+	return null;
+};
+
+EquipPropTextTabsWide = function(__)
+{
+	const _ = Log.dive('EquipPropTextTabsWide');
+	const geo = EquipPropTabsWideGeometry;
+
+	const signedRel32 = value =>
+		value > 0x7FFFFFFF ? value - 0x100000000 : value;
+
+	const callTargetVir = callPhy =>
+	{
+		if (Exe.GetUint8(callPhy) !== 0xE8)
+			throw Error(`Expected CALL rel32 at ${callPhy.toHex()}`);
+		const targetPhy = callPhy + 5 + signedRel32(Exe.GetInt32(callPhy + 1));
+		return Exe.Phy2Vir(targetPhy, CODE);
+	};
+
+	const appendCall = (code, baseVir, targetVir) =>
+	{
+		const callVir = baseVir + code.byteCount();
+		return code + " E8" + ((targetVir - (callVir + 5)) >>> 0).toHex();
+	};
+
+	const expectHex = (addr, expected, label) =>
+	{
+		const wanted = expected.replace(/\s+/g, "").toUpperCase();
+		const actual = EquipPropTabsWideHex(addr, wanted.length / 2);
+		if (actual !== wanted)
+			throw Error(`${label}: expected ${wanted}, found ${actual} at ${addr.toHex()}`);
+	};
+
+	const patchHex = (addr, expected, replacement, label) =>
+	{
+		expectHex(addr, expected, label);
+		Exe.SetHex(addr, replacement);
+	};
+
+	$$(_, '1.1 - Resolve the eight native label setup blocks')
+	const labelAddrs = EquipPropTabsWideLabels();
+	if (!labelAddrs)
+		throw Error("EquipmentProperties label blocks not found (expected 8)");
+
+	const lo = labelAddrs[0] - 0x3000;
+	const hi = labelAddrs[7] + 0x2000;
+
+	const findOne = (pattern, label) =>
+	{
+		const addrs = Exe.FindHexN(pattern, lo, hi);
+		if (addrs.length !== 1)
+			throw Error(`${label} matched ${addrs.length} sites (expected 1)`);
+		return addrs[0];
+	};
+
+	const continuationCandidates = Exe.FindHexN(
+		WC + " 8D 4D D0 E8" + ALLWC + " C7 45 FC" + WC + " 00 00 00", lo, hi
+	).filter(addr =>
+		Exe.GetUint8(addr) === 0x53
+		|| Exe.GetUint8(addr) === 0x56
+		|| Exe.GetUint8(addr) === 0x57
+	);
+	const labelContinuations = labelAddrs.map((addr, idx) =>
+	{
+		const matches = continuationCandidates.filter(
+			candidate => candidate > addr && candidate < addr + 0xD0
+		);
+		if (matches.length !== 1)
+			throw Error(`Tab ${idx + 1} label continuation matched ${matches.length} sites`);
+		return matches[0];
+	});
+
+	$$(_, '1.2 - Resolve GetMsgString and SetTextOrientation')
+	const getMsgRefs = Exe.FindHexN("68 BD 0F 00 00 E8" + ALLWC);
+	if (getMsgRefs.length === 0)
+		throw Error("GetMsgString reference for MSI 0x0FBD was not found");
+	const getMsgStringVir = callTargetVir(getMsgRefs[0] + 5);
+	for (const ref of getMsgRefs)
+	{
+		if (callTargetVir(ref + 5) !== getMsgStringVir)
+			throw Error("MSI 0x0FBD references do not agree on GetMsgString");
+	}
+
+	const orientationBodies = Exe.FindHexN("55 8B EC 8B 45 08 89 81 3C 01 00 00");
+	if (orientationBodies.length !== 1)
+		throw Error(`SetTextOrientation matched ${orientationBodies.length} sites (expected 1)`);
+	const orientationVir = Exe.Phy2Vir(orientationBodies[0], CODE);
+
+	const orientationSites = Exe.FindHexN("6A 01 8B" + WC + " E8" + ALLWC, lo, hi).filter(addr =>
+		Exe.GetUint8(addr + 3) >= 0xC8 && Exe.GetUint8(addr + 3) <= 0xCF
+		&& callTargetVir(addr + 4) === orientationVir
+	).sort((a, b) => a - b);
+	if (orientationSites.length !== 8)
+		throw Error(`Tab orientation calls matched ${orientationSites.length} sites (expected 8)`);
+
+	$$(_, '1.3 - Resolve the window geometry sites')
+	const tabSizeSites = Exe.FindHexN("6A 22 6A 12", lo, hi).sort((a, b) => a - b);
+	if (tabSizeSites.length !== 8)
+		throw Error(`Tab sizes matched ${tabSizeSites.length} sites (expected 8)`);
+
+	const titleSize      = findOne("6A 12 6A 64", "Title size");
+	const listSize       = findOne("68 16 01 00 00", "List width");
+	const listRowWidth   = findOne("C7 80 B4 00 00 00 09 01 00 00", "List row width");
+	const listMove       = findOne("6A 11 6A 15", "List position");
+	const scrollMove     = findOne("6A 00 68 09 01 00 00", "Scrollbar position");
+	const innerContainer = findOne("68 09 01 00 00 6A 12", "Tab column size");
+
+	const rowNameSites = Exe.FindHexN("68 D8 00 00 00", orientationSites[7], orientationSites[7] + 0x1000);
+	if (rowNameSites.length === 0)
+		throw Error("Attribute name width not found after the tab setup");
+	const rowNameSize = rowNameSites[0];
+
+	$$(_, '2.1 - Replace hardcoded labels with MSI_EQUIPMENT_PROPERTIES_TAB0..7')
+	labelAddrs.forEach((addr, idx) =>
+	{
+		const blockVir = Exe.Phy2Vir(addr, CODE);
+		const continuationVir = Exe.Phy2Vir(labelContinuations[idx], CODE);
+		let code = "68" + (0x10A7 + idx).toHex(4);
+		code = appendCall(code, blockVir, getMsgStringVir);
+		code += " 83 C4 04";
+		const continuationPush = Exe.GetUint8(labelContinuations[idx]);
+		if (continuationPush === 0x53)
+			code += " 8B D8";
+		else if (continuationPush === 0x56)
+			code += " 8B F0";
+		else
+			code += " 8B F8";
+		const jumpVir = blockVir + code.byteCount();
+		code += " E9" + ((continuationVir - (jumpVir + 5)) >>> 0).toHex();
+		Exe.SetHex(addr, code);
+	});
+
+	$$(_, '3.1 - Widen the tabs and draw their labels horizontally')
+	tabSizeSites.forEach((addr, idx) =>
+		patchHex(addr, "6A 22 6A 12", "6A 22 6A" + geo.tabWidth.toHex(1), `Tab ${idx + 1} size`)
+	);
+	orientationSites.forEach((addr, idx) =>
+	{
+		expectHex(addr, "6A 01 8B", `Tab ${idx + 1} orientation`);
+		Exe.SetHex(addr, "6A 00");
+	});
+
+	$$(_, '3.2 - Widen the tab column and move the list to its right')
+	const shift = geo.tabWidth - 18;
+	patchHex(innerContainer,
+		"68 09 01 00 00 6A 12",
+		"68 09 01 00 00 6A" + geo.tabWidth.toHex(1),
+		"Tab column size");
+	patchHex(listMove,
+		"6A 11 6A 15",
+		"6A 11 6A" + (21 + shift).toHex(1),
+		"List position");
+	patchHex(listSize,
+		"68 16 01 00 00",
+		"68" + (278 - shift).toHex(4),
+		"List width");
+	patchHex(listRowWidth,
+		"C7 80 B4 00 00 00 09 01 00 00",
+		"C7 80 B4 00 00 00" + (265 - shift).toHex(4),
+		"List row width");
+	patchHex(scrollMove,
+		"6A 00 68 09 01 00 00",
+		"6A 00 68" + (265 - shift).toHex(4),
+		"Scrollbar position");
+	patchHex(rowNameSize,
+		"68 D8 00 00 00",
+		"68" + (216 - shift).toHex(4),
+		"Attribute name width");
+
+	$$(_, '3.3 - Let the window title fit')
+	patchHex(titleSize, "6A 12 6A 64", "6A 12 6A" + geo.titleWidth.toHex(1), "Title width");
+
+	return Log.rise(true);
+};
+
+EquipPropTextTabsWide.validate = function()
+{
+	return EquipPropTabsWideLabels() !== null;
+};

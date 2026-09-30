@@ -38,6 +38,12 @@ CustomUI:
             author : Noxara Solutions
             desc : Rewrites the 8 Korean category tab labels in the Equipment Attribute window to short English (St/Ab/Bt/El/Rc/Sk/Sp/Al).
 
+        - EquipPropTextTabsWide:
+            title : Equipment Attribute tabs wide with msgstring labels
+            recommend : no
+            author : Victor Hugo, EclageRO, linkineox (2026-02-19 port by Noxara Solutions)
+            desc : Turns the tab column of the Equipment Attribute window into 52 px wide tabs with horizontal text and labels from msgstringtable lines MSI_EQUIPMENT_PROPERTIES_TAB0..7 (4264-4271). The list moves right so the window keeps its size. Use instead of EqAttrEnglishTabs.
+
         - LoadGRFOnSlashCmd:
             title : Load GRF via Slash Command
             recommend : no
