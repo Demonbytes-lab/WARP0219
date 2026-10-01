@@ -99,7 +99,10 @@ RestoreServiceSelect = function(__)
 
 	$$(_, '1.2 - Find the clientinfo connection list builder and the hooks that use it')
 	const builderVir = Exe.Phy2Vir(findUnique(RestoreServiceSelectBuilder, "Clientinfo connection list builder"));
-	findUnique(RestoreServiceSelectListHook(builderVir), "Server list hook");
+	const listHook = findUnique(RestoreServiceSelectListHook(builderVir), "Server list hook");
+	const reopenVir = Exe.GetUint32(listHook + 8);
+	if (Exe.GetUint32(listHook + 17) !== reopenVir)
+		throw Error("Server list hook does not clear the flag it tests");
 	findUnique(RestoreServiceSelectPickHook, "Service pick hook");
 
 	$$(_, '1.3 - Find g_hideAccountList')
@@ -117,8 +120,11 @@ RestoreServiceSelect = function(__)
 
 	const stub = (baseVir, gate, stock) => assemble(baseVir, [
 		...gate,
+		"80 3D" + reopenVir.toHex() + " 00",
+		{short: "75", to: "show"},
 		"80 3D" + onceVir.toHex() + " 00",
 		{short: "75", to: "stock"},
+		{label: "show"},
 		"C6 05" + onceVir.toHex() + " 01",
 		"80 3D" + hideVir.toHex() + " 00",
 		{short: "75", to: "stock"},
@@ -136,23 +142,33 @@ RestoreServiceSelect = function(__)
 		"8F 87 C4 01 00 00",
 		"8F 87 C8 01 00 00",
 		{label: "stock"},
+		"C6 05" + reopenVir.toHex() + " 00",
 		...stock
 	]);
 
-	const gateA = ["83 7F 04 01", {short: "77", to: "stock"}];
-	const stockA = ["8B 07 8B CF 6A 00 6A 00 6A 00 6A 00 6A 1C FF 50 18", {jmp: endVir}];
+	const redirect = baseVir => assemble(baseVir, [
+		"83 7F 04 01",
+		{short: "77", to: "stock"},
+		"80 3D" + onceVir.toHex() + " 00",
+		{short: "75", to: "stock"},
+		"C7 47 0C 02 00 00 00",
+		{jmp: endVir},
+		{label: "stock"},
+		"8B 07 8B CF 6A 00 6A 00 6A 00 6A 00 6A 1C FF 50 18",
+		{jmp: endVir}
+	]);
 	const gateB = ["83 7F 04 02", {short: "75", to: "stock"}];
 	const stockB = [state2First, {jmp: state2Vir + 6}];
 
-	const sizeA = stub(0, gateA, stockA).byteCount();
+	const sizeA = redirect(0).byteCount();
 	const [phyA, virA] = Exe.Allocate(sizeA);
-	Exe.SetHex(phyA, stub(virA, gateA, stockA));
+	Exe.SetHex(phyA, redirect(virA));
 
 	const sizeB = stub(0, gateB, stockB).byteCount();
 	const [phyB, virB] = Exe.Allocate(sizeB);
 	Exe.SetHex(phyB, stub(virB, gateB, stockB));
 
-	$$(_, '2.2 - Route login states 0, 1 and 2 through the stubs')
+	$$(_, '2.2 - Send login states 0 and 1 to state 2 and hook the login window block')
 	Exe.SetHex(state0, "E9" + ((virA - (state0Vir + 5)) >>> 0).toHex() + " 90".repeat(17));
 	Exe.SetHex(state2, "E9" + ((virB - (state2Vir + 5)) >>> 0).toHex() + " 90");
 

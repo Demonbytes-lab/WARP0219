@@ -90,7 +90,7 @@ CustomUI:
             title : Restore service selection before login
             recommend : no
             author : Noxara Solutions
-            desc : Brings back the pre-login service selection on the 2026-02-19 client. When clientinfo.xml lists two or more connections, a list of their display names opens before the ID/password window and the login goes to the address and port of the picked connection. hideaccountlist and Skip service selection still skip it.
+            desc : Brings back the pre-login service selection on the 2026-02-19 client. When clientinfo.xml lists two or more connections, a list of their display names opens before the ID/password window and the login goes to the address and port of the picked connection. The Opening button on the login window brings the list back to switch servers. hideaccountlist and Skip service selection still skip it.
         
         - GuildBrackets:
             title : Use normal guild brackets
