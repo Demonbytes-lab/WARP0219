@@ -133,6 +133,12 @@ CustomAura:
     mutex : false
     
     patches:
+        - EnableCostumeAuras:
+            title : Enable costume aura effects (February 2026)
+            recommend : no
+            author : Noxara Solutions
+            desc : Enables eleven class-coloured costume auras for HatEffects 99?109 on supported February 2026 clients. Uses compact aura effects and restores the normal level aura when eligible after unequipping. Requires matching aura textures, client HatEffect definitions, and server-side item scripts.
+
         - CustomAuraSprites:
             title : Customize Aura sprites
             recommend : no

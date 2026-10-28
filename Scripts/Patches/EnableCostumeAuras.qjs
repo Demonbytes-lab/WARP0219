@@ -1,0 +1,346 @@
+EnableCostumeAuras = function(_)
+{
+    const nt = Exe.GetUint32(0x3C), opt = nt + 24;
+    if (Exe.GetUint16(opt) !== 0x10B || Exe.GetUint32(opt + 28) !== 0x400000 || (Exe.GetUint16(opt + 70) & 0x40))
+        throw Error("Costume auras require the supported non-ASLR February PE32 client");
+    const sectionTable = opt + Exe.GetUint16(nt + 20), sectionCount = Exe.GetUint16(nt + 6);
+    const physical = address =>
+    {
+        const rva = address - 0x400000;
+        for (let i = 0; i < sectionCount; i++)
+        {
+            const row = sectionTable + i * 40, va = Exe.GetUint32(row + 12), size = Exe.GetUint32(row + 16);
+            if (rva >= va && rva + 4 <= va + size)
+                return Exe.GetUint32(row + 20) + rva - va;
+        }
+        throw Error("Costume aura reference is outside the original PE sections");
+    };
+    const virtual = address => Exe.Phy2Vir(address, CODE);
+    const relative = address => virtual(address + 5) + Exe.GetInt32(address + 1);
+    const one = (hits, name) =>
+    {
+        if (hits.length !== 1)
+            throw Error(name + " matched " + hits.length + " sites; expected 1");
+        return hits[0];
+    };
+    const locate = (pattern, name) => one(Exe.FindHexN(pattern, 0, Exe.FileSize), name);
+    const expect = (address, pattern, name) =>
+    {
+        const at = physical(address);
+        if (Exe.FindHex(pattern, at, at + pattern.byteCount()) !== at)
+            throw Error(name + " has an unsupported instruction layout");
+    };
+    const ctor = locate("55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 51 56 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 8B F1 89 75 F0 68 C8 00 00 00 E8 ?? ?? ?? ?? C7 45 FC 00 00 00 00 8D 86 CC 00 00 00 C7 06 ?? ?? ?? ?? B9 02 00 00 00 0F 1F 44 00 00 C7 00 00 00 00 00 8D 40 0C C7 40 F8 00 00 00 00 C7 40 FC 00 00 00 00 83 E9 01 75 ?? 89 8E E4 00 00 00 89 8E E8 00 00 00 89 8E EC 00 00 00", "Native aura constructor");
+    const vtable = Exe.GetUint32(ctor + 0x42), vt = physical(vtable);
+    const factory = one(Exe.FindHexN("55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 51 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 68 ?? ?? ?? ?? 68 FC 00 00 00 E8 ?? ?? ?? ?? 83 C4 08 89 45 F0 C7 45 FC 00 00 00 00 85 C0 74 ?? 8B C8 E8 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8B 4D F4", 0, Exe.FileSize).filter(at => relative(at + 0x45) === virtual(ctor)), "Native aura factory");
+    const dispatch = locate("8B 7D FC 8D 45 24 50 8D 45 F0 89 75 24 50 8D 4F 08 E8 ?? ?? ?? ?? 8B 4D F8 80 79 0D 00 75 ??", "Effect factory fallback");
+    const allocated = locate("8B 49 14 8B 01 FF 50 04 8B F8 85 FF 74 ?? FF 75 08 8B CF E8 ?? ?? ?? ?? FF 75 1C", "Effect factory continuation");
+    if (allocated <= dispatch || allocated > dispatch + 0x80)
+        throw Error("Effect factory continuation is outside the expected block");
+    const hat = locate("81 7D EC FE 00 00 00 75 ?? 6A FF 8B CF E8 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 74 ?? 6A 00 68 ?? ?? ?? ?? 68 ?? ?? ?? ?? 6A 00", "Costume effect handler");
+    const managerSite = locate("8B 0D ?? ?? ?? ?? 0F 57 C9 6A 00 6A 00 6A FF 6A 00 83 EC 0C C7 45 E4 00 00 00 00 8B 45 E4 8B D4 0F 57 C0", "Costume effect manager");
+    const removal = locate("FF 75 08 FF B1 10 01 00 00 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B E5 5D C2 08 00", "Native costume removal call");
+    const level = locate("C7 87 DC 02 00 00 01 00 00 00 E9 ?? ?? ?? ?? 8B BD 14 FF FF FF 6A 6A C7 87 B4 02 00 00 01 00 00 00 E8 ?? ?? ?? ?? 88 85 E7 FE FF FF 83 C4 04 8B C7 0F BE 88 B8 02 00 00 39 0D ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? FF B0 C0 02 00 00 E8 ?? ?? ?? ?? 83 C4 04 84 C0 0F 85 ?? ?? ?? ?? 8B F7 FF B6 C0 02 00 00", "Standard aura guard") + 0x2F;
+    const a = {
+        nativeFactory: virtual(factory),
+        nativeInit: Exe.GetUint32(vt + 4),
+        nativeUpdate: Exe.GetUint32(vt + 12),
+        nativeAlive: Exe.GetUint32(vt + 24),
+        textureLoad: virtual(locate("55 8B EC 56 6A 00 6A 01 6A 00 6A 00 FF 75 08 8B F1 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 89 46 18 5E 5D C2 04 00 CC", "Particle texture loader")),
+        setRGB: virtual(locate("55 8B EC 66 8B 45 08 66 83 F8 FF 74 ?? 66 89 41 3C 66 8B 45 0C 66 83 F8 FF 74 ?? 66 89 41 3E 66 8B 45 10 66 83 F8 FF 74 ?? 66 89 41 40 5D C2 0C 00 CC CC", "Particle colour setter")),
+        findEffect: virtual(locate("55 8B EC 83 EC 0C 56 8D 45 08 50 8D 71 10 8D 45 F4 8B CE 50 E8 ?? ?? ?? ?? 8B 4D FC 80 79 0D 00 75 ?? 8B 45 08 3B 41 10 7C ?? 8B 06 EB ?? 8B 0E 8B C1 3B C8 74 ?? 8B 49 14 8B 01 3B C1 74 ?? 8B 75 0C 8B 50 08 39 72 04", "Effect lookup")),
+        removeEffect: relative(removal + 15),
+        restoreBase: virtual(locate("56 6A 6B 8B F1 E8 ?? ?? ?? ?? 83 C4 04 84 C0 0F 85 ?? ?? ?? ?? 6A FF 8B CE E8 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 74 ?? 0F BF 86 10 02 00 00 39 05 ?? ?? ?? ??", "Native level aura eligibility")),
+        hideBase: virtual(locate("56 57 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 6A 00 8B F9 68 C8 00 00 00 6A 00 6A 6D 8B 07 57 C6 87 B8 02 00 00 00 FF 50 08 6A 00 6A 00 6A 00", "Standard aura removal")),
+        manager: Exe.GetUint32(managerSite + 2),
+        auraLevel: Exe.GetUint32(level + 11),
+        dispatchOriginal: virtual(dispatch + 6),
+        dispatchAllocated: virtual(allocated + 8),
+        hatContinue: virtual(hat + 7),
+        levelContinue: virtual(level + 27),
+        levelEnd: virtual(level + 21) + Exe.GetInt32(level + 17)
+    };
+    if (a.manager !== Exe.GetUint32(removal + 11))
+        throw Error("Costume handlers reference different effect managers");
+    expect(a.nativeInit, "55 8B EC 83 EC 0C 53 8B C1 33 DB 56 89 45 FC 83 C0 08 57 89 5D F8 33 FF 6A 0D 50 E8 ?? ?? ?? ??", "Native aura initializer");
+    expect(a.nativeUpdate, "55 8B EC 81 EC 94 00 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 FC F3 0F 10 15 ?? ?? ?? ?? F3 0F 10 1D ?? ?? ?? ?? 53 8B D9 56 57 8B B3 E4 00 00 00 3B B3 E8 00 00 00 0F 84 ?? ?? ?? ?? 66 0F 1F 44 00 00", "Native aura update");
+    expect(a.nativeAlive, "E9 ?? ?? ?? ??", "Native aura lifetime");
+    expect(Exe.GetUint32(vt + 16), "55 8B EC 83 EC 1C A1 ?? ?? ?? ?? 33 C5 89 45 FC 56 57 8B F9 8B B7 E4 00 00 00 3B B7 E8 00 00 00 74 ?? 8B 0E 85 C9", "Native aura drawing");
+    expect(Exe.GetUint32(vt + 20), "56 57 8B F9 8B B7 E4 00 00 00 3B B7 E8 00 00 00 74 ?? FF 36 E8 ?? ?? ?? ?? 83 C6 04 83 C4 04 3B B7 E8 00 00 00 75 ?? 8B B7 E4 00 00 00 89 B7 E8 00 00 00 8B B7 F0 00 00 00", "Native aura cleanup");
+    expect(a.removeEffect, "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 0C 53 56 57 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 8B F1 FF 75 0C FF 75 08 E8 ?? ?? ?? ?? 85 C0 0F 84 ?? ?? ?? ?? 89 45 0C", "Native effect removal");
+    expect(a.levelEnd, "8B 4D F4 64 89 0D 00 00 00 00 59 5F 5E 8B 4D EC 33 CD E8 ?? ?? ?? ?? 8B E5 5D 8B E3 5B C2 3C 00", "Standard aura exit");
+    const f32 = value =>
+    {
+        const buffer = new ArrayBuffer(4);
+        new DataView(buffer).setFloat32(0, value, true);
+        return Array.from(new Uint8Array(buffer)).map(byte => byte.toHex(1)).join("");
+    };
+    const ascii = value => Array.from(value + "\0").map(ch => ch.charCodeAt(0).toHex(1)).join("");
+    const blocks = [
+    {
+        "at": 0,
+        "hex": "81 FE 2D 05 00 00 72 1C 81 FE 37 05 00 00 77 14 E8 00 00 00 00 85 C0 74 06 C7 00 00 00 00 00 E9 00 00 00 00 8B 7D FC 8D 45 24 E9 00 00 00 00"
+    },
+    {
+        "at": 256,
+        "hex": "53 56 57 89 CE E8 00 00 00 00 8B 46 04 2D 2D 05 00 00 8B 1C 85 00 00 00 00 8B BE E4 00 00 00 3B BE E8 00 00 00 73 37 8B 0F 85 C9 74 2C 53 E8 00 00 00 00 8B 0F 68 FF 00 00 00 68 FF 00 00 00 68 FF 00 00 00 E8 00 00 00 00 8B 0F C7 41 1C 21 00 00 00 C7 41 44 FF 00 00 00 83 C7 04 EB C1 8B 5E 04 81 EB 2D 05 00 00 6B DB 0C 81 C3 00 00 00 00 8B BE F0 00 00 00 3B BE F4 00 00 00 0F 83 80 00 00 00 8B 0F 85 C9 74 72 68 00 00 00 00 E8 00 00 00 00 8B 0F FF 73 08 FF 73 04 FF 33 E8 00 00 00 00 8B 0F C7 41 1C 21 00 00 00 C7 41 44 FF 00 00 00 F3 0F 10 05 00 00 00 00 F3 0F 10 0D 00 00 00 00 8D 91 F8 01 00 00 B8 04 00 00 00 F3 0F 10 12 F3 0F 59 D0 F3 0F 11 12 F3 0F 10 52 04 F3 0F 59 D1 F3 0F 11 52 04 F3 0F 10 52 08 F3 0F 59 D0 F3 0F 11 52 08 83 C2 20 48 75 D2 83 C7 04 E9 74 FF FF FF 89 F1 E8 00 00 00 00 5F 5E 5B C3"
+    },
+    {
+        "at": 768,
+        "hex": "E9 00 00 00 00"
+    },
+    {
+        "at": 1536,
+        "hex": "80 B9 C8 00 00 00 00 74 03 B0 01 C3 E9 00 00 00 00"
+    },
+    {
+        "at": 2560,
+        "hex": "81 7D EC 2D 05 00 00 72 52 81 7D EC 37 05 00 00 77 49 60 FF 75 EC FF B7 10 01 00 00 8B 0D 00 00 00 00 E8 00 00 00 00 80 7B 0C 00 75 1B 89 F9 E8 CC 01 00 00 85 C0 75 22 C6 87 B8 02 00 00 FF 89 F9 E8 00 00 00 00 EB 12 89 F9 E8 00 00 00 00 A1 00 00 00 00 88 87 B8 02 00 00 61 81 7D EC FE 00 00 00 E9 00 00 00 00"
+    },
+    {
+        "at": 2816,
+        "hex": "60 89 C1 E8 F8 00 00 00 85 C0 74 11 A1 00 00 00 00 88 87 B8 02 00 00 61 E9 00 00 00 00 61 FF B0 C0 02 00 00 E9 00 00 00 00"
+    },
+    {
+        "at": 3072,
+        "hex": "53 56 89 CE BB 2D 05 00 00 83 3D 00 00 00 00 00 74 28 53 FF B6 10 01 00 00 8B 0D 00 00 00 00 E8 00 00 00 00 85 C0 74 09 80 B8 C8 00 00 00 00 75 0D 43 81 FB 37 05 00 00 7E D8 31 C0 EB 05 B8 01 00 00 00 5E 5B C3"
+    }
+];
+    const fixups = [
+    {
+        "at": 17,
+        "to": "nativeFactory",
+        "relative": true
+    },
+    {
+        "at": 27,
+        "cave": 1796
+    },
+    {
+        "at": 32,
+        "to": "dispatchAllocated",
+        "relative": true
+    },
+    {
+        "at": 43,
+        "to": "dispatchOriginal",
+        "relative": true
+    },
+    {
+        "at": 262,
+        "to": "nativeInit",
+        "relative": true
+    },
+    {
+        "at": 277,
+        "cave": 3328
+    },
+    {
+        "at": 303,
+        "to": "textureLoad",
+        "relative": true
+    },
+    {
+        "at": 325,
+        "to": "setRGB",
+        "relative": true
+    },
+    {
+        "at": 364,
+        "cave": 2304
+    },
+    {
+        "at": 393,
+        "cave": 2048
+    },
+    {
+        "at": 398,
+        "to": "textureLoad",
+        "relative": true
+    },
+    {
+        "at": 413,
+        "to": "setRGB",
+        "relative": true
+    },
+    {
+        "at": 437,
+        "cave": 2512
+    },
+    {
+        "at": 445,
+        "cave": 2516
+    },
+    {
+        "at": 517,
+        "to": "nativeUpdate",
+        "relative": true
+    },
+    {
+        "at": 769,
+        "to": "nativeUpdate",
+        "relative": true
+    },
+    {
+        "at": 1549,
+        "to": "nativeAlive",
+        "relative": true
+    },
+    {
+        "at": 2590,
+        "to": "manager"
+    },
+    {
+        "at": 2595,
+        "to": "removeEffect",
+        "relative": true
+    },
+    {
+        "at": 2626,
+        "to": "restoreBase",
+        "relative": true
+    },
+    {
+        "at": 2635,
+        "to": "hideBase",
+        "relative": true
+    },
+    {
+        "at": 2640,
+        "to": "auraLevel"
+    },
+    {
+        "at": 2659,
+        "to": "hatContinue",
+        "relative": true
+    },
+    {
+        "at": 2829,
+        "to": "auraLevel"
+    },
+    {
+        "at": 2841,
+        "to": "levelEnd",
+        "relative": true
+    },
+    {
+        "at": 2853,
+        "to": "levelContinue",
+        "relative": true
+    },
+    {
+        "at": 3083,
+        "to": "manager"
+    },
+    {
+        "at": 3099,
+        "to": "manager"
+    },
+    {
+        "at": 3104,
+        "to": "findEffect",
+        "relative": true
+    }
+];
+    const names = [
+    "rune_knight_red",
+    "royal_guard_blue",
+    "warlock_violet",
+    "sorcerer_light_blue",
+    "ranger_green",
+    "minstrel_pink",
+    "archbishop_white",
+    "guillotine_cross_silver",
+    "shadow_chaser_black",
+    "mechanic_gold",
+    "genetic_yellowgreen"
+];
+    const colours = [
+    [
+        255,
+        45,
+        5
+    ],
+    [
+        30,
+        150,
+        255
+    ],
+    [
+        170,
+        40,
+        255
+    ],
+    [
+        80,
+        200,
+        255
+    ],
+    [
+        40,
+        230,
+        70
+    ],
+    [
+        255,
+        80,
+        170
+    ],
+    [
+        255,
+        255,
+        255
+    ],
+    [
+        180,
+        200,
+        220
+    ],
+    [
+        35,
+        20,
+        8
+    ],
+    [
+        255,
+        180,
+        20
+    ],
+    [
+        160,
+        235,
+        30
+    ]
+];
+    const nativeVtable = Exe.GetHex(vt - 4, 0x8C);
+    const [free, base] = Exe.Allocate(0x1000, 0x10);
+    Exe.SetHex(free, "00".repeat(0x1000));
+    for (const block of blocks)
+        Exe.SetHex(free + block.at, block.hex);
+    for (const fixup of fixups)
+    {
+        let value = fixup.cave !== undefined ? base + fixup.cave : a[fixup.to];
+        if (fixup.relative)
+            value -= base + fixup.at + 4;
+        Exe.SetHex(free + fixup.at, (value >>> 0).toHex(4));
+    }
+    Exe.SetHex(free + 0x700, nativeVtable);
+    Exe.SetHex(free + 0x708, (base + 0x100).toHex(4));
+    Exe.SetHex(free + 0x710, (base + 0x300).toHex(4));
+    Exe.SetHex(free + 0x71C, (base + 0x600).toHex(4));
+    Exe.SetHex(free + 0x800, ascii("effect\\ring_white.tga"));
+    Exe.SetHex(free + 0x900, colours.map(rgb => rgb.map(value => value.toHex(4)).join("")).join(""));
+    Exe.SetHex(free + 0x9D0, f32(1.2) + f32(1.0));
+    for (let i = 0; i < names.length; i++)
+    {
+        Exe.SetHex(free + 0xD00 + i * 4, (base + 0xD40 + i * 64).toHex(4));
+        Exe.SetHex(free + 0xD40 + i * 64, ascii("effect\\pikapika_" + names[i] + ".tga"));
+    }
+    const hook = (at, offset, size) => Exe.SetHex(at, "E9" + ((base + offset - virtual(at) - 5) >>> 0).toHex(4) + "90".repeat(size - 5));
+    hook(dispatch, 0, 6);
+    hook(hat, 0xA00, 7);
+    hook(level + 21, 0xB00, 6);
+    return true;
+};
+
+EnableCostumeAuras.validate = () => [20260210, 20260211].includes(Exe.BuildDate);
